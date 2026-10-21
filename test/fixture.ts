@@ -24,6 +24,9 @@ export async function fixture() {
   await rename(join(root, 'old-name.txt'), join(root, 'renamed.txt'));
   await writeFile(join(root, 'image.bin'), Buffer.from([0, 3]));
   git('add', '.'); git('commit', '-m', 'Build diff explorer and visual canvas');
+  for (let i = 1; i <= 4; i++) { git('commit', '--allow-empty', '-m', `History checkpoint ${i}`); }
+  git('tag', 'v0.1', base.oid);
+  git('tag', '-a', 'v0.2', '-m', 'Fixture release');
   const target = await repo.resolve('HEAD');
   await writeFile(join(root, 'src/extension.ts'), 'staged edit\n'); git('add', 'src/extension.ts');
   await writeFile(join(root, 'src/extension.ts'), 'staged edit\nworking edit\n');

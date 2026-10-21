@@ -15,7 +15,7 @@ npm ci
 npm run check
 npm run compile
 npm run package
-code --install-extension git-sniffer-0.1.1.vsix
+code --install-extension git-sniffer-0.1.2.vsix
 ```
 
 For development, open this directory in VS Code and press F5 using **Run Git Sniffer**. The development host can open any Git workspace.
@@ -31,7 +31,9 @@ Choose the comparison kind from the toolbar:
 | Unstaged | Index | Working tree, including untracked files |
 | Uncommitted | HEAD | Working tree, including untracked files |
 
-Commit mode initially compares HEAD's first parent with HEAD. For a root commit the base is the empty tree. Before the first commit, use a working comparison; its HEAD side is the empty tree. Click BASE or TARGET for a searchable branch, tag and recent-commit picker, or enter a revision such as `main`, `origin/main`, `HEAD~3` or a hash. **Empty tree** is also available as the commit base. Picking a commit switches back to Commits mode. The swap button reverses a commit comparison.
+Commit mode initially compares HEAD's first parent with HEAD. For a root commit the base is the empty tree. Before the first commit, use a working comparison; its HEAD side is the empty tree. Click BASE or TARGET for a searchable revision picker. The title-bar filter buttons show All, Tags, Branches (local and remote), or Commits (the latest 200). Type a Git revision such as `main`, `origin/main`, `HEAD^`, `HEAD~5`, `HEAD^2` or a hash directly into the search field, then accept **Use Git revision expression**. Expressions remain available in every category; use the ASCII `~` character. Git reports an error if the requested ancestor does not exist. **Empty tree** is also available as the commit base. Picking a commit switches back to Commits mode. The swap button reverses a commit comparison.
+
+The **‹ / ›** buttons next to each endpoint move only that endpoint by one commit. **‹** follows its first parent; **›** follows a direct child reachable from repository refs or the selected revisions. If several children exist, a picker asks which one to follow. Navigation preserves the selected tip so a commit entered by hash can be revisited after moving to its parent. A root or tip displays a message without changing the comparison. These buttons are disabled for working comparisons, the empty tree and while loading.
 
 Branch and tag selections resolve to fixed commits. Refresh keeps those commits fixed; pick the branch again to follow its new tip. Refresh rereads the index and working files for working comparisons. Ignored untracked files are excluded. The extension reads repository state without staging, checking out or committing.
 

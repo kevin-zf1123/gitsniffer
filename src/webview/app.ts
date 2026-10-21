@@ -17,9 +17,9 @@ app.innerHTML = `
   <button id="refresh" class="quiet" title="Refresh comparison">↻ <span>Refresh</span></button>
 </header>
 <section class="comparison-bar" aria-label="Comparison revisions">
-  <button class="revision" id="base" data-side="base"><span class="revision-label">BASE</span><span class="revision-name">Choose branch or commit</span><span class="revision-hash"></span><span class="revision-action">⌄</span></button>
+  <div class="revision-group"><button class="revision" id="base" data-side="base"><span class="revision-label">BASE</span><span class="revision-name">Choose branch or commit</span><span class="revision-hash"></span><span class="revision-action">⌄</span></button><button class="quiet revision-step" id="base-older" aria-label="Base: previous commit" title="Base: previous commit (first parent)" disabled>‹</button><button class="quiet revision-step" id="base-newer" aria-label="Base: next commit" title="Base: next commit (choose a child)" disabled>›</button></div>
   <button id="swap" class="quiet swap" aria-label="Swap base and target" title="Swap comparison direction">⇄</button>
-  <button class="revision" id="target" data-side="target"><span class="revision-label">TARGET</span><span class="revision-name">Choose branch or commit</span><span class="revision-hash"></span><span class="revision-action">⌄</span></button>
+  <div class="revision-group"><button class="revision" id="target" data-side="target"><span class="revision-label">TARGET</span><span class="revision-name">Choose branch or commit</span><span class="revision-hash"></span><span class="revision-action">⌄</span></button><button class="quiet revision-step" id="target-older" aria-label="Target: previous commit" title="Target: previous commit (first parent)" disabled>‹</button><button class="quiet revision-step" id="target-newer" aria-label="Target: next commit" title="Target: next commit (choose a child)" disabled>›</button></div>
 </section>
 <section class="navigation-bar">
   <nav id="breadcrumbs" aria-label="Folder path"></nav>
@@ -56,6 +56,13 @@ function applySettings(value: Settings) {
   el<HTMLSelectElement>('mode').value = mode;
 }
 function hideTooltip() { el('tooltip').hidden = true; }
+function updateSteps() {
+  for (const side of ['base', 'target'] as const) {
+    for (const direction of ['older', 'newer']) {
+      el<HTMLButtonElement>(`${side}-${direction}`).disabled = busy || !comparison || comparison.kind !== 'commits' || !!comparison[side].empty;
+    }
+  }
+}
 function tooltip(event: MouseEvent, node: TreeNode) {
   const tip = el('tooltip');
   tip.replaceChildren();
@@ -188,6 +195,9 @@ function render() {
 }
 for (const side of ['base', 'target'] as const) {
   el(side).addEventListener('click', () => send({ type: 'pick', side }));
+  for (const direction of ['older', 'newer'] as const) {
+    el(`${side}-${direction}`).addEventListener('click', () => send({ type: 'step', side, direction }));
+  }
   el(side).addEventListener('dragover', event => { event.preventDefault(); event.stopPropagation(); el(side).classList.add('drag-over'); if (event.dataTransfer) { event.dataTransfer.dropEffect = 'copy'; } });
   el(side).addEventListener('dragleave', () => el(side).classList.remove('drag-over'));
   el(side).addEventListener('drop', event => drop(event, side));
@@ -248,11 +258,11 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
       el<HTMLSelectElement>('kind').value = comparison.kind;
       el<HTMLButtonElement>('swap').disabled = comparison.kind !== 'commits' || !!comparison.base.empty;
       el<HTMLDialogElement>('other-dialog').close();
-      el('error').hidden = true; persist(); render(); break;
+      el('error').hidden = true; updateSteps(); persist(); render(); break;
     }
     case 'settings': applySettings(message.settings); render(); break;
-    case 'reset': comparison = undefined; tree = buildTree([]); el('other').hidden = true; el('summary').textContent = 'Loading repository…'; render(); break;
-    case 'busy': busy = message.busy; canvas.setAttribute('aria-busy', String(busy)); app.classList.toggle('busy', busy); el('refresh').classList.toggle('spinning', busy); break;
+    case 'reset': comparison = undefined; tree = buildTree([]); el('other').hidden = true; el('summary').textContent = 'Loading repository…'; updateSteps(); render(); break;
+    case 'busy': busy = message.busy; canvas.setAttribute('aria-busy', String(busy)); app.classList.toggle('busy', busy); el('refresh').classList.toggle('spinning', busy); updateSteps(); break;
     case 'error': showError(message.message); break;
   }
 });

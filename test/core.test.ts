@@ -206,3 +206,49 @@ test('uncommitted comparison reconciles staged removal and staged rename with re
     assert.equal(files.length, 1); assert.equal(files[0]?.path, 'new.txt'); assert.equal(files[0]?.added, 20); assert.equal(files[0]?.deleted, 0);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('revision expressions, typed ref choices and DAG steps use real Git history without checkout', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'git-sniffer-revisions-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  try {
+    git('init', '-b', 'main'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
+    const commits: string[] = [];
+    for (let i = 0; i < 8; i++) { git('commit', '--allow-empty', '-m', `Commit ${i}`); commits.push(git('rev-parse', 'HEAD')); }
+    const repo = new GitRepository(root);
+    git('config', 'log.showNotes', 'true');
+    git('notes', 'add', '-m', 'History note that must not become a revision choice');
+    for (const depth of [1, 3, 5, 7]) { assert.equal((await repo.resolve(`HEAD~${depth}`)).oid, commits[7 - depth]); }
+    assert.equal((await repo.resolve('HEAD^')).oid, commits[6]);
+    await assert.rejects(repo.resolve('HEAD~8'), /Cannot resolve Git revision "HEAD~8".*requested ancestor exists/);
+    assert.equal(await repo.parent(commits[0]!), undefined);
+    assert.equal((await repo.parent(commits[7]!))?.oid, commits[6]);
+    assert.deepEqual((await repo.children(commits[6]!)).map(child => child.ref), [commits[7]]);
+    assert.deepEqual(await repo.children(commits[7]!), []);
+    git('tag', '-a', 'release', '-m', 'Annotated release', commits[3]!);
+    git('branch', 'release', commits[4]!);
+    git('update-ref', 'refs/remotes/origin/main', commits[7]!);
+    const choices = await repo.choices();
+    assert.equal(choices.find(choice => choice.ref === 'refs/tags/release')?.kind, 'tag');
+    assert.equal(choices.find(choice => choice.ref === 'refs/heads/release')?.kind, 'branch');
+    assert.equal(choices.find(choice => choice.ref === 'refs/remotes/origin/main')?.kind, 'branch');
+    assert.equal(choices.find(choice => choice.ref === commits[7])?.kind, 'commit');
+    assert.equal((await repo.resolve('refs/tags/release')).oid, commits[3]);
+    const tree = git('rev-parse', 'HEAD^{tree}');
+    const side = git('commit-tree', tree, '-p', commits[0]!, '-m', 'Side branch');
+    git('update-ref', 'refs/heads/side', side);
+    assert.deepEqual(new Set((await repo.children(commits[0]!)).map(child => child.ref)), new Set([commits[1], side]));
+    const merge = git('commit-tree', tree, '-p', commits[7]!, '-p', side, '-m', 'Merge side');
+    git('update-ref', 'refs/heads/main', merge);
+    assert.equal((await repo.parent(merge))?.oid, commits[7]);
+    assert.equal((await repo.resolve('HEAD^2')).oid, side);
+    assert.deepEqual((await repo.children(side)).map(child => child.ref), [merge]);
+    const hidden = git('commit-tree', tree, '-p', commits[7]!, '-m', 'Unreferenced child');
+    assert.ok(!(await repo.children(commits[7]!)).some(child => child.ref === hidden));
+    assert.ok((await repo.children(commits[7]!, [hidden])).some(child => child.ref === hidden));
+    await assert.rejects(repo.children('--all'));
+    await assert.rejects(repo.parent('HEAD'));
+    assert.equal(git('rev-parse', 'HEAD'), merge);
+    assert.equal(git('symbolic-ref', 'HEAD'), 'refs/heads/main');
+    assert.equal(git('status', '--porcelain'), '');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

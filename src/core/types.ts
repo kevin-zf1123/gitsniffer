@@ -14,7 +14,9 @@ export interface DiffFile {
   oldMode: string;
   newMode: string;
 }
-export interface RefChoice { ref: string; description: string }
+export type RefKind = 'tag' | 'branch' | 'commit';
+export type RefFilter = 'all' | RefKind;
+export interface RefChoice { ref: string; description: string; kind: RefKind }
 export interface Settings { mode: AreaMode; addedColor: string; deletedColor: string }
 export interface Comparison {
   kind: ComparisonKind;
@@ -32,6 +34,7 @@ export type HostMessage =
 export type ClientMessage =
   | { type: 'ready' | 'refresh' | 'swap' | 'repository' }
   | { type: 'pick'; side: Side }
+  | { type: 'step'; side: Side; direction: 'older' | 'newer' }
   | { type: 'kind'; kind: ComparisonKind }
   | { type: 'drop'; side?: Side; value: string }
   | { type: 'openDiff'; path: string };

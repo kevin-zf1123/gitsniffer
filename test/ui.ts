@@ -47,6 +47,15 @@ window.messages=[];window.viewState=undefined;window.acquireVsCodeApi=()=>({post
     await page.locator('#close-dialog').click();
     await page.locator('#base').dispatchEvent('drop', { dataTransfer: await page.evaluateHandle(() => { const data = new DataTransfer(); data.setData('text/plain', 'baseline'); return data; }) });
     assert.deepEqual(await page.evaluate(() => (window as unknown as { messages: unknown[] }).messages.at(-1)), { type: 'drop', side: 'base', value: 'baseline' });
+    for (const side of ['base', 'target']) {
+      for (const direction of ['older', 'newer']) {
+        await page.locator(`#${side}-${direction}`).click();
+        assert.deepEqual(await page.evaluate(() => (window as unknown as { messages: unknown[] }).messages.at(-1)), { type: 'step', side, direction });
+      }
+    }
+    await page.evaluate(() => window.postMessage({ type: 'busy', busy: true }, '*'));
+    await page.waitForFunction(() => (document.getElementById('base-older') as HTMLButtonElement).disabled);
+    await page.evaluate(() => window.postMessage({ type: 'busy', busy: false }, '*'));
     await page.locator('#kind').selectOption('staged');
     assert.deepEqual(await page.evaluate(() => (window as unknown as { messages: unknown[] }).messages.at(-1)), { type: 'kind', kind: 'staged' });
     for (const kind of ['staged', 'unstaged', 'uncommitted'] as const) {
@@ -54,6 +63,7 @@ window.messages=[];window.viewState=undefined;window.acquireVsCodeApi=()=>({post
       await page.evaluate(c => window.postMessage({ type: 'comparison', comparison: c, settings: { mode: 'total', addedColor: '#238636', deletedColor: '#c24040' } }, '*'), { kind, repository: data.root, base: value.base, target: value.target, files: value.files });
       await page.waitForFunction(kind => (document.getElementById('kind') as HTMLSelectElement).value === kind && (document.getElementById('swap') as HTMLButtonElement).disabled, kind);
       assert.equal(await page.locator('#swap').isDisabled(), true);
+      for (const side of ['base', 'target']) { for (const direction of ['older', 'newer']) { assert.equal(await page.locator(`#${side}-${direction}`).isDisabled(), true); } }
     }
     // Repository-controlled text is rendered literally, with no HTML execution.
     const malicious = { ...comparison, files: [{ ...comparison.files[0]!, path: '<img src=x onerror=alert(1)>.ts', oldPath: '<img src=x onerror=alert(1)>.ts' }] };

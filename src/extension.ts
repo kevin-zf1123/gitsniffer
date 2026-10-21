@@ -4,8 +4,9 @@ import { randomBytes } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { GitRepository } from './core/git';
 import { droppedSelection, selectionContext } from './core/integration';
-import type { ClientMessage, Comparison, ComparisonKind, HostMessage, Revision, Settings, Side } from './core/types';
+import type { ClientMessage, Comparison, ComparisonKind, HostMessage, RefFilter, Revision, Settings, Side } from './core/types';
 import { Snapshots } from './snapshots';
+import { showRevisionPicker } from './revisionPicker';
 
 interface GitAPI {
   repositories: { rootUri: vscode.Uri }[];
@@ -30,6 +31,8 @@ class Sniffer {
   private requested?: { base: Revision; target: Revision };
   private kind: ComparisonKind = 'commits';
   private contents = new Map<string, Uint8Array>();
+  private pickerFilter: RefFilter = 'all';
+  private navigationTips: Partial<Record<Side, string>> = {};
   private version = 0;
   private git?: GitAPI;
   private queue: Promise<unknown> = Promise.resolve();
@@ -115,6 +118,7 @@ class Sniffer {
   private changeRepository(repo: GitRepository): void {
     if (repo.root === this.repo?.root) { return; }
     this.version++; this.repo = repo; this.comparison = undefined; this.requested = undefined;
+    this.navigationTips = {};
     this.contents.clear(); this.send({ type: 'reset' });
   }
 
@@ -135,6 +139,9 @@ class Sniffer {
         this.kind = m.kind; await this.refresh();
       } break;
       case 'pick': if (m.side === 'base' || m.side === 'target') { await this.pick(m.side); } break;
+      case 'step': if ((m.side === 'base' || m.side === 'target') && (m.direction === 'older' || m.direction === 'newer')) {
+        await this.step(m.side, m.direction);
+      } break;
       case 'drop': if ((m.side === undefined || m.side === 'base' || m.side === 'target') && typeof m.value === 'string') {
         const selection = droppedSelection(m.value);
         const side = m.side ?? (await vscode.window.showQuickPick([
@@ -145,7 +152,11 @@ class Sniffer {
       } break;
       case 'swap': {
         const current = this.requested;
-        if (this.kind === 'commits' && current && !current.base.empty) { this.requested = { base: current.target, target: current.base }; await this.refresh(); }
+        if (this.kind === 'commits' && current && !current.base.empty) {
+          this.requested = { base: current.target, target: current.base };
+          this.navigationTips = { base: this.navigationTips.target, target: this.navigationTips.base };
+          await this.refresh();
+        }
         break;
       }
       case 'repository': {
@@ -216,6 +227,7 @@ class Sniffer {
       if (version !== this.version) { return; }
       this.kind = 'commits';
       this.requested = { ...revisions, [side]: revision };
+      this.navigationTips[side] = revision.empty ? undefined : revision.oid;
       await this.refresh();
     } catch (error) { if (version === this.version) { this.error(error); } }
   }
@@ -224,17 +236,36 @@ class Sniffer {
     const repo = this.repo;
     if (!repo) { return; }
     const choices = await repo.choices().catch(() => []);
-    const items = [
-      { label: '$(edit) Enter branch, tag, or commit…', ref: ':input:', description: 'Accepts revisions such as main, HEAD~3, or a hash' },
-      ...(side === 'base' ? [{ label: '$(circle-slash) Empty tree', ref: ':empty:', description: 'Compare every line in the target' }] : []),
-      ...choices.map(choice => ({ label: choice.ref.replace(/^refs\/(heads|remotes|tags)\//, ''), ...choice }))
-    ];
-    const selection = await vscode.window.showQuickPick(items, { title: `Git Sniffer · ${side === 'base' ? 'Base' : 'Target'} revision`, matchOnDescription: true });
-    if (!selection || this.repo !== repo) { return; }
-    const ref = selection.ref === ':input:'
-      ? await vscode.window.showInputBox({ title: 'Git Sniffer · Revision', prompt: 'Branch, tag, or commit (resolved without checking out)', placeHolder: 'main / feature/parser / HEAD~3 / a1b2c3d' })
-      : selection.ref;
+    const { ref, filter } = await showRevisionPicker(side, choices, this.pickerFilter);
+    this.pickerFilter = filter;
     if (ref && this.repo === repo) { await this.setRefNow(side, ref); }
+  }
+
+  private async step(side: Side, direction: 'older' | 'newer'): Promise<void> {
+    const repo = this.repo, revisions = this.requested;
+    if (!repo || !revisions || this.kind !== 'commits' || revisions[side].empty) { return; }
+    const current = revisions[side];
+    const version = ++this.version;
+    this.send({ type: 'busy', busy: true });
+    try {
+      this.navigationTips[side] ??= current.oid;
+      let next: Revision | undefined;
+      if (direction === 'older') { next = await repo.parent(current.oid); }
+      else {
+        const tips = [this.navigationTips[side]!, ...[revisions.base, revisions.target].filter(ref => !ref.empty).map(ref => ref.oid)];
+        const children = await repo.children(current.oid, tips);
+        const choice = children.length === 1 ? children[0] : children.length > 1
+          ? await vscode.window.showQuickPick(children.map(child => ({ label: child.ref.slice(0, 8), description: child.description, ref: child.ref })),
+            { title: `Git Sniffer · ${side === 'base' ? 'Base' : 'Target'} next commit`, placeHolder: 'Multiple child commits: choose the branch to follow' })
+          : undefined;
+        if (choice) { next = { oid: choice.ref, label: choice.ref.slice(0, 8) }; }
+        else if (children.length) { return; }
+      }
+      if (version !== this.version) { return; }
+      if (!next) { void vscode.window.showInformationMessage(direction === 'older' ? 'This is a root commit; there is no older parent.' : 'No newer child commit is reachable from the repository refs or selected revisions.'); return; }
+      this.requested = { ...revisions, [side]: next };
+      await this.refresh();
+    } finally { if (version === this.version) { this.send({ type: 'busy', busy: false }); } }
   }
 
   private async openDiff(filePath: string): Promise<void> {

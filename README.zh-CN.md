@@ -15,7 +15,7 @@ npm ci
 npm run check
 npm run compile
 npm run package
-code --install-extension git-sniffer-0.1.1.vsix
+code --install-extension git-sniffer-0.1.2.vsix
 ```
 
 开发时在 VS Code 打开此目录，选择 **Run Git Sniffer** 并按 F5。开发宿主可以打开任意 Git 工作区。
@@ -31,7 +31,9 @@ code --install-extension git-sniffer-0.1.1.vsix
 | Unstaged | 暂存区 | 工作区，包括未跟踪文件 |
 | Uncommitted | HEAD | 工作区，包括未跟踪文件 |
 
-Commits 默认比较 HEAD 的第一父提交与 HEAD；根提交的基准为空树。尚无首个 commit 时可使用工作区比较，此时 HEAD 一侧为空树。点击 BASE 或 TARGET，可以搜索分支、标签和近期 commit，也可以输入 `main`、`origin/main`、`HEAD~3` 或 hash。commit 基准还可选择 **Empty tree**。选入 commit 会切回 Commits 模式；交换按钮用于反转 commit 比较方向。
+Commits 默认比较 HEAD 的第一父提交与 HEAD；根提交的基准为空树。尚无首个 commit 时可使用工作区比较，此时 HEAD 一侧为空树。点击 BASE 或 TARGET，打开可搜索的 revision 选择器。标题栏的筛选按钮可切换 All、Tags、Branches（本地与远程）和 Commits（最近 200 条）。可以直接在搜索框输入 `main`、`origin/main`、`HEAD^`、`HEAD~5`、`HEAD^2` 或 hash，并确认 **Use Git revision expression**。所有分类都允许直接输入表达式；其中 `~` 使用 ASCII 半角字符。如果指定的祖先提交不存在，会显示 Git 错误。commit 基准还可选择 **Empty tree**。选入 commit 会切回 Commits 模式；交换按钮用于反转 commit 比较方向。
+
+每个比较端点旁的 **‹ / ›** 按钮只移动该端点一个 commit。**‹** 走第一父提交；**›** 走仓库引用或所选 revision 可达的直接子提交。存在多个子提交时，由选择器询问要跟随哪一条分支。导航会保留所选的历史顶端，因此通过 hash 选入的 commit 在退到父提交后仍可前进返回。到达根提交或历史顶端时显示提示，保持比较不变。工作区比较、空树和加载期间禁用这些按钮。
 
 分支和标签会解析为固定 commit。Refresh 保持这些 commit 不变；要跟随分支的新位置，需要重新选择分支。工作区模式的 Refresh 会重新读取暂存区和工作文件。忽略规则排除的未跟踪文件不会计入。插件读取仓库状态，不执行暂存、检出或提交。
 

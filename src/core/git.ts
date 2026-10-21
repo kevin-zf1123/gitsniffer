@@ -84,7 +84,9 @@ export class GitRepository {
 
   async resolve(ref: string): Promise<Revision> {
     if (!ref || ref.length > 1024 || /[\0\r\n]/.test(ref)) { throw new Error('Enter a branch, tag, or commit.'); }
-    const oid = (await this.run(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`])).toString('utf8').trim();
+    let oid: string;
+    try { oid = (await this.run(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`])).toString('utf8').trim(); }
+    catch (error) { throw new Error(`Cannot resolve Git revision "${ref}". Check the name and that the requested ancestor exists.\n${(error as Error).message}`); }
     if (!isOid(oid)) { throw new Error('Git did not resolve a commit.'); }
     return { oid, label: ref };
   }
@@ -206,18 +208,37 @@ export class GitRepository {
   async choices(): Promise<RefChoice[]> {
     const [refs, commits] = await Promise.all([
       this.run(['for-each-ref', '--format=%(refname)%00%(objectname:short)', 'refs/heads', 'refs/remotes', 'refs/tags']),
-      this.run(['log', '--all', 'HEAD', '--no-show-signature', '--topo-order', '-n', '200', '--format=%H%x00%s'])
+      this.run(['log', '--all', 'HEAD', '--no-show-signature', '--no-notes', '--topo-order', '-n', '200', '--format=%H%x00%s'])
     ]);
     return [
       ...refs.toString('utf8').split('\n').filter(Boolean).map(line => {
         const [ref = '', oid = ''] = line.split('\0');
-        return { ref, description: oid };
+        return { ref, description: oid, kind: ref.startsWith('refs/tags/') ? 'tag' as const : 'branch' as const };
       }),
       ...commits.toString('utf8').split('\n').filter(Boolean).map(line => {
         const [ref = '', description = ''] = line.split('\0');
-        return { ref, description };
+        return { ref, description, kind: 'commit' as const };
       })
     ];
+  }
+
+  async parent(oid: string): Promise<Revision | undefined> {
+    if (!isOid(oid)) { throw new Error('Invalid Git commit ID.'); }
+    const parents = (await this.run(['show', '--no-patch', '--no-show-signature', '--no-notes', '--format=%P', oid, '--'])).toString('utf8').trim();
+    const parent = parents.split(' ')[0];
+    return parent ? { oid: parent, label: parent.slice(0, 8) } : undefined;
+  }
+
+  async children(oid: string, tips: string[] = []): Promise<RefChoice[]> {
+    if (!isOid(oid) || tips.some(tip => !isOid(tip))) { throw new Error('Invalid Git commit ID.'); }
+    // Include the selected tip so back/forward also works for detached or
+    // otherwise unreachable commits entered by hash.
+    const output = await this.run(['log', '--all', '--no-show-signature', '--no-notes', '--topo-order', '--ancestry-path',
+      '--format=%H%x00%P%x00%s', ...new Set([oid, ...tips]), `^${oid}`, '--']);
+    return output.toString('utf8').split('\n').filter(Boolean).flatMap(line => {
+      const [ref = '', parents = '', description = ''] = line.split('\0');
+      return parents.split(' ').includes(oid) ? [{ ref, description, kind: 'commit' as const }] : [];
+    });
   }
 
   async readObject(oid: string, mode: string): Promise<Uint8Array> {
