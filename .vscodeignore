@@ -1,0 +1,12 @@
+.vscode/**
+.vscode-test/**
+.gitignore
+src/**
+test/**
+scripts/**
+node_modules/**
+tsconfig.json
+package-lock.json
+*.vsix
+dist/extension-host-test.js
+dist/**/*.map

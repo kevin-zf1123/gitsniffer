@@ -1,0 +1,142 @@
+{
+  "name": "git-sniffer",
+  "displayName": "Git Sniffer",
+  "description": "Explore Git diffs as a SpaceSniffer-style treemap. Drop branches or commits to compare snapshots.",
+  "version": "0.1.1",
+  "publisher": "gitsniffer",
+  "private": true,
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Visualization"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onWebviewPanel:gitSniffer"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "gitSniffer.open",
+        "title": "Git Sniffer: Open",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "gitSniffer.setBase",
+        "title": "Git Sniffer: Use as Base"
+      },
+      {
+        "command": "gitSniffer.pickBase",
+        "title": "Git Sniffer: Choose Base Revision"
+      },
+      {
+        "command": "gitSniffer.setTarget",
+        "title": "Git Sniffer: Use as Target"
+      },
+      {
+        "command": "gitSniffer.pickTarget",
+        "title": "Git Sniffer: Choose Target Revision"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "gitSniffer.open",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "gitSniffer.setBase",
+          "when": "(view == gitGraphPlus.branches && (viewItem == branch || viewItem == branch-current)) || (view == gitGraphPlus.remotes && viewItem == remote-branch) || (view == gitGraphPlus.tags && viewItem == tag)",
+          "group": "7_gitSniffer@1"
+        },
+        {
+          "command": "gitSniffer.setTarget",
+          "when": "(view == gitGraphPlus.branches && (viewItem == branch || viewItem == branch-current)) || (view == gitGraphPlus.remotes && viewItem == remote-branch) || (view == gitGraphPlus.tags && viewItem == tag)",
+          "group": "7_gitSniffer@2"
+        }
+      ],
+      "scm/sourceControl": [
+        {
+          "command": "gitSniffer.open",
+          "when": "scmProvider == git",
+          "group": "5_gitSniffer@1"
+        },
+        {
+          "command": "gitSniffer.pickBase",
+          "when": "scmProvider == git",
+          "group": "5_gitSniffer@2"
+        },
+        {
+          "command": "gitSniffer.pickTarget",
+          "when": "scmProvider == git",
+          "group": "5_gitSniffer@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Git Sniffer",
+      "properties": {
+        "gitSniffer.areaMode": {
+          "type": "string",
+          "enum": [
+            "total",
+            "added",
+            "deleted"
+          ],
+          "default": "total",
+          "description": "Initial treemap area: all changed lines, additions, or deletions."
+        },
+        "gitSniffer.addedColor": {
+          "type": "string",
+          "default": "#238636",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "Green used for added lines (hex RGB)."
+        },
+        "gitSniffer.deletedColor": {
+          "type": "string",
+          "default": "#c24040",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "Red used for deleted lines (hex RGB)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node scripts/build.mjs",
+    "check": "tsc --noEmit",
+    "watch": "node scripts/build.mjs --watch",
+    "test": "tsx --test test/*.test.ts",
+    "test:ui": "tsx test/ui.ts",
+    "test:extension": "node --import tsx scripts/test-extension.mjs",
+    "package": "npm run check && npm run compile && vsce package --no-dependencies --allow-missing-repository --skip-license --no-rewrite-relative-links",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.96.0",
+    "@vscode/test-electron": "^2.5.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.50.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "license": "UNLICENSED"
+}
