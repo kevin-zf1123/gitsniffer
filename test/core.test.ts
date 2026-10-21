@@ -67,6 +67,12 @@ test('drop adapter accepts branches, hashes, and native Source Control history U
   assert.deepEqual(selectionContext({ branch: { name: 'main', hash } }), { ref: hash });
   assert.deepEqual(selectionContext({ tag: { name: 'v1.0' } }), { ref: 'v1.0' });
   assert.deepEqual(selectionContext({ ref: 'main', repositoryPath: '/repo' }), { ref: 'main', root: '/repo' });
+  const provider = { rootUri: { fsPath: '/repo with spaces' } };
+  assert.deepEqual(selectionContext(provider, { id: hash }), { ref: hash, root: '/repo with spaces' });
+  assert.deepEqual(selectionContext(provider, { id: 'b'.repeat(64) }), { ref: 'b'.repeat(64), root: '/repo with spaces' });
+  assert.throws(() => selectionContext(provider, { id: 'HEAD' }));
+  assert.throws(() => selectionContext(provider, { id: hash }, { id: hash }));
+  assert.throws(() => selectionContext({}, { id: hash }));
 });
 
 test('real Git snapshots handle edits, added/deleted/renamed/binary files and exact diff content', async () => {

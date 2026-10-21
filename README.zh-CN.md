@@ -15,7 +15,7 @@ npm ci
 npm run check
 npm run compile
 npm run package
-code --install-extension git-sniffer-0.1.2.vsix
+code --install-extension git-sniffer-0.1.3.vsix
 ```
 
 开发时在 VS Code 打开此目录，选择 **Run Git Sniffer** 并按 F5。开发宿主可以打开任意 Git 工作区。
@@ -57,14 +57,19 @@ Commits 默认比较 HEAD 的第一父提交与 HEAD；根提交的基准为空�
 
 ## 外部 graph 接入
 
-可以把已有 Git graph 放在画布旁边：
+在 VS Code 的 **Source Control Graph（源代码管理图）** 中，右键单个 commit，选择 **Git Sniffer: Use as Base** 或 **Git Sniffer: Use as Target**。命令使用该 commit 及其来源仓库，打开画布并切换到 Commits 模式。多选时不显示这两个入口。Incoming/Outgoing 汇总行不是 commit，选入时会被拒绝。仓库引用、HEAD、暂存区和工作文件保持不变。
 
-- **Git Graph+ 0.7.3**：在 Source Control 的本地分支、当前分支、远程分支或标签树中右键，选择 **Git Sniffer: Use as Base / Target**。同时打开多个仓库时需要选择来源仓库，因为 Git Graph+ 的树节点参数不含仓库路径。
-- **VS Code Source Control Graph**：支持 commit 拖拽的版本中，拖起 commit，在进入画布时按住 Shift，放到 BASE 或 TARGET。直接放到画布会询问放入哪一侧。适配器识别原生 `scm-history-item` URI，并核验 commit 与已打开仓库。该内部格式已按 VS Code 1.130 核验；较旧的受支持版本可能没有此拖拽手势。
-- **Git Graph+ 图**：其本地分支和 HEAD 标签提供分支名称文本，可拖到比较槽；普通分支文本在 Git Sniffer 当前仓库内解析。该图的 commit 行未提供外部拖拽或菜单扩展接口，可使用 **Copy SHA** 后通过选择器输入。
-- **Source Control 仓库菜单**：**Git Sniffer: Open** 和 **Choose Base / Target Revision** 为对应仓库打开画布或选择器。
+该菜单使用 VS Code 的 proposed API `contribSourceControlHistoryItemMenu`。安装 VSIX 后，运行 **Preferences: Configure Runtime Arguments**，在 `argv.json` 中加入以下属性（保留其他配置），然后完全退出并重启 VS Code：
 
-原生历史项的右键菜单仍需要 proposed VS Code API，因此插件使用稳定的仓库菜单和可选拖拽适配器。插件不依赖 Git Graph+，也没有复制其实现。
+```json
+"enable-proposed-api": ["gitsniffer.git-sniffer"]
+```
+
+如果 `enable-proposed-api` 已列出其他扩展，将 `gitsniffer.git-sniffer` 追加到该数组。也可用 `code --enable-proposed-api gitsniffer.git-sniffer` 启动 VS Code。开发宿主和扩展宿主测试会显式启用该 proposal。此入口要求 VS Code 版本提供该 proposal；当前接入面向桌面版 Source Control Graph。
+
+Git Graph 和 Git Graph+ 的 commit 菜单中没有 Git Sniffer 入口。可以在这些扩展中复制 commit SHA，再到 BASE / TARGET 选择器输入。本插件不修改这两个扩展。仍可将普通分支文本拖到比较槽，分支会在 Git Sniffer 当前所选仓库中解析。
+
+Source Control 的仓库菜单提供 **Git Sniffer: Open** 和 **Choose Base / Target Revision**。支持 commit 拖拽的原生 Source Control Graph 也可拖入：进入画布时按住 Shift，放到 BASE 或 TARGET；直接放到画布会询问放入哪一侧。
 
 其他扩展可以通过命令选入 revision：
 

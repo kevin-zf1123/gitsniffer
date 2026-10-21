@@ -21,8 +21,17 @@ export function droppedSelection(value: string): SelectionContext {
   }
   return { ref: droppedRef(value) };
 }
-/** Public command objects and Git Graph+ BranchTreeItem/TagTreeItem arguments. */
-export function selectionContext(value: unknown): SelectionContext {
+/** Public refs, tree arguments, and native Graph's SourceControl + history item. */
+export function selectionContext(value: unknown, ...historyItems: unknown[]): SelectionContext {
+  if (historyItems.length) {
+    const root = selectionContext(value).root;
+    const item = historyItems[0];
+    if (!root || historyItems.length !== 1 || !item || typeof item !== 'object' || !('id' in item) ||
+      typeof item.id !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(item.id)) {
+      throw new Error('Select a single Git commit in the Source Control Graph.');
+    }
+    return { root, ref: item.id };
+  }
   if (typeof value === 'string') { return { ref: value }; }
   if (value && typeof value === 'object') {
     const item = value as Record<string, unknown>;

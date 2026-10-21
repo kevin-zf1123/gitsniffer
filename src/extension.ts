@@ -196,9 +196,9 @@ class Sniffer {
     finally { if (version === this.version) { this.send({ type: 'busy', busy: false }); } }
   }
 
-  setFromContext(side: Side, value: unknown): Promise<void> {
+  setFromContext(side: Side, value: unknown, ...historyItems: unknown[]): Promise<void> {
     return this.enqueue(async () => {
-      const selection = selectionContext(value);
+      const selection = selectionContext(value, ...historyItems);
       if (!selection.ref) { await this.useContextRepository(value); await this.open(); await this.pick(side); return; }
       // Git Graph+ tree arguments have no repository root. Ask when ambiguous.
       if (!selection.root) {
@@ -309,8 +309,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(snapshots, sniffer, statusBar,
     vscode.workspace.registerFileSystemProvider('git-sniffer', snapshots, { isReadonly: true, isCaseSensitive: true }),
     command('gitSniffer.open', value => sniffer.openFromContext(value)),
-    ...(['base', 'target'] as const).map(side => command(`gitSniffer.set${side === 'base' ? 'Base' : 'Target'}`, async value => {
-      await sniffer.setFromContext(side, value);
+    ...(['base', 'target'] as const).map(side => command(`gitSniffer.set${side === 'base' ? 'Base' : 'Target'}`, async (value, ...historyItems) => {
+      await sniffer.setFromContext(side, value, ...historyItems);
     })),
     ...(['base', 'target'] as const).map(side => command(`gitSniffer.pick${side === 'base' ? 'Base' : 'Target'}`, async value => {
       await sniffer.pickFromContext(side, value);

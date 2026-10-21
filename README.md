@@ -15,7 +15,7 @@ npm ci
 npm run check
 npm run compile
 npm run package
-code --install-extension git-sniffer-0.1.2.vsix
+code --install-extension git-sniffer-0.1.3.vsix
 ```
 
 For development, open this directory in VS Code and press F5 using **Run Git Sniffer**. The development host can open any Git workspace.
@@ -57,14 +57,19 @@ Folder counts sum their descendants. A file with zero weight in the selected mod
 
 ## External graph integration
 
-Keep your preferred Git graph next to the canvas:
+In VS Code's **Source Control Graph**, right-click a single commit and choose **Git Sniffer: Use as Base** or **Git Sniffer: Use as Target**. The command uses that commit and its source repository, opens the canvas, and switches to Commits mode. Multi-selection is excluded. Incoming/Outgoing summary rows are not commits and are rejected. Repository refs, HEAD, the index and working files are left unchanged.
 
-- **Git Graph+ 0.7.3**: right-click a local branch, current branch, remote branch or tag in its Source Control trees and select **Git Sniffer: Use as Base / Target**. When multiple repositories are open, choose the source repository because Git Graph+ tree arguments contain no repository path.
-- **VS Code Source Control Graph**: on versions that expose commit dragging, drag a commit, hold Shift while entering the canvas, and drop on BASE or TARGET. Dropping on the canvas asks which side to set. The adapter recognizes the native `scm-history-item` URI and validates its commit and open repository. This internal format was checked against VS Code 1.130; older supported VS Code versions may not offer the drag gesture.
-- **Git Graph+ graph**: its local branch and HEAD badges expose branch names as text and can be dropped on a comparison slot. Plain branch text is resolved in Git Sniffer's selected repository. Its commit rows do not expose an external drag or menu hook; use **Copy SHA** and the revision picker for those commits.
-- **Source Control repository menu**: **Git Sniffer: Open** and **Choose Base / Target Revision** open the canvas or picker for that repository.
+This menu uses VS Code's proposed `contribSourceControlHistoryItemMenu` API. For an installed VSIX, run **Preferences: Configure Runtime Arguments**, add the following property to `argv.json` (preserving other entries), then fully quit and restart VS Code:
 
-Native history-item context menus currently require a proposed VS Code API, so this extension uses stable repository menus and the optional drag adapter. It has no dependency on Git Graph+ and does not copy its implementation.
+```json
+"enable-proposed-api": ["gitsniffer.git-sniffer"]
+```
+
+If `enable-proposed-api` already lists other extensions, append `gitsniffer.git-sniffer` to that array. An alternative is to launch VS Code with `code --enable-proposed-api gitsniffer.git-sniffer`. The development host and extension-host tests enable the proposal explicitly. This requires a VS Code version that provides the proposal; the current integration targets the desktop Source Control Graph.
+
+Git Graph and Git Graph+ commit menus have no Git Sniffer entries. Copy a commit SHA from those extensions and enter it in the BASE / TARGET picker instead. This extension does not modify either extension. Plain branch text can still be dropped onto a comparison slot and is resolved in Git Sniffer's selected repository.
+
+The Source Control repository menu provides **Git Sniffer: Open** and **Choose Base / Target Revision**. Native Source Control Graph commit dragging is also accepted on versions that expose it: hold Shift while entering the canvas and drop on BASE or TARGET. Dropping on the canvas asks which side to set.
 
 Other extensions can select a revision through commands:
 

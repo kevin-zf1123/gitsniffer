@@ -32,13 +32,13 @@ export async function run() {
     const input = workbench.locator('.quick-input-widget input');
     await workbench.getByRole('button', { name: 'Filter: Tags', exact: true }).click();
     await workbench.getByText('v0.1', { exact: true }).waitFor();
-    assert.equal(await workbench.locator('.quick-input-list').getByText('main', { exact: true }).count(), 0);
+    await workbench.locator('.quick-input-list').getByText('main', { exact: true }).waitFor({ state: 'hidden' });
     await workbench.getByRole('button', { name: 'Filter: Branches', exact: true }).click();
     await workbench.locator('.quick-input-list').getByText('main', { exact: true }).waitFor();
-    assert.equal(await workbench.locator('.quick-input-list').getByText('v0.1', { exact: true }).count(), 0);
+    await workbench.locator('.quick-input-list').getByText('v0.1', { exact: true }).waitFor({ state: 'hidden' });
     await workbench.getByRole('button', { name: 'Filter: Commits', exact: true }).click();
     await workbench.locator('.quick-input-list').getByText('History checkpoint 4', { exact: true }).waitFor();
-    assert.equal(await workbench.locator('.quick-input-list').getByText('main', { exact: true }).count(), 0);
+    await workbench.locator('.quick-input-list').getByText('main', { exact: true }).waitFor({ state: 'hidden' });
     await input.fill('HEAD~5');
     await workbench.getByText('Use Git revision expression', { exact: true }).waitFor({ timeout: 3000 });
     await workbench.keyboard.press('Enter');
@@ -84,6 +84,30 @@ export async function run() {
     const page = frame.page();
     const source = page.locator('.scm-history-view .monaco-list-row[draggable="true"]:has(.history-item)').filter({ hasText: 'Create initial modules' }).first();
     await source.waitFor({ timeout: 15_000 });
+    // Click actual native graph context-menu entries, with no direct command injection.
+    const gitState = () => ['rev-parse HEAD', 'symbolic-ref HEAD', 'status --porcelain=v1'].map(args => execFileSync('git', args.split(' '), { cwd: root, encoding: 'utf8' }));
+    const beforeMenus = gitState();
+    for (const [side, subject, oid] of [
+      ['base', 'History checkpoint 1', revisionAt('HEAD~3')],
+      ['target', 'History checkpoint 2', revisionAt('HEAD~2')]
+    ] as const) {
+      await vscode.commands.executeCommand('workbench.scm.history.focus');
+      const row = page.locator('.scm-history-view .monaco-list-row:has(.history-item)').filter({ hasText: subject }).first();
+      await row.click({ button: 'right' });
+      // VS Code installs menu mouseup listeners after a 100 ms accidental-click guard.
+      await new Promise(resolve => setTimeout(resolve, 150));
+      await page.getByRole('menuitem', { name: `Git Sniffer: Use as ${side === 'base' ? 'Base' : 'Target'}`, exact: true }).click();
+      frame = undefined;
+      const menuDeadline = Date.now() + 10_000;
+      while (!frame && Date.now() < menuDeadline) {
+        for (const candidate of page.frames()) { if (await candidate.locator('#canvas').count().catch(() => 0)) { frame = candidate; } }
+        if (!frame) { await new Promise(resolve => setTimeout(resolve, 100)); }
+      }
+      assert.ok(frame, 'Context menu opens Git Sniffer');
+      await waitForRevision(side, oid);
+    }
+    assert.deepEqual(gitState(), beforeMenus, 'Selecting graph commits preserves HEAD, branch and working/index state');
+    await vscode.commands.executeCommand('workbench.scm.history.focus');
     // Exercise the native graph's real drag handler. OS cross-frame gestures
     // remain a manual check; this test transfers the emitted payload explicitly.
     const transfer = await page.evaluateHandle(() => new DataTransfer());
@@ -97,6 +121,6 @@ export async function run() {
     const received = await frame.evaluateHandle(text => { const data = new DataTransfer(); data.setData('text/plain', text); return data; }, payload);
     await frame.locator('#base').dispatchEvent('drop', { dataTransfer: received });
     await frame.waitForFunction(base => (document.getElementById('kind') as HTMLSelectElement).value === 'commits' && document.querySelector('#base .revision-hash')?.textContent === base, process.env.SNIFFER_BASE!.slice(0, 8));
-    console.log('Extension host passed: picker type filters, direct HEAD~5, older/newer on both endpoints, native diff with exact commit/index/working content, native Graph drag payload -> comparison. Physical drag gesture needs manual validation.');
+    console.log('Extension host passed: native Graph right-click Use as Base/Target -> exact commits without repository changes; picker filters and revision navigation; native commit/index/working diffs; Graph drag payload -> comparison. Physical drag gesture needs manual validation.');
   } finally { await browser.close(); }
 }
