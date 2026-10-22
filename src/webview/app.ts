@@ -1,5 +1,5 @@
 import { buildTree, layout, weight, type TreeNode } from '../core/treemap';
-import type { AreaMode, ClientMessage, Comparison, HostMessage, Settings, Side } from '../core/types';
+import type { AreaMode, ClientMessage, Comparison, DiffFile, HostMessage, Settings, Side } from '../core/types';
 
 declare function acquireVsCodeApi(): { postMessage(message: ClientMessage): void; getState(): unknown; setState(state: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -27,9 +27,10 @@ app.innerHTML = `
 </section>
 <div id="error" role="alert" hidden></div>
 <main id="canvas" aria-label="Diff treemap" aria-busy="false"><div id="tiles"></div><div id="empty" class="empty"><div class="empty-mark">▥</div><h2>See where the code changed.</h2><p>Choose a base and target branch or commit to explore the diff.</p><button id="start">Choose target revision</button></div><div class="drop-overlay">Drop a branch or commit<br><small>Use the BASE / TARGET slots, or drop here to choose a side</small></div></main>
-<footer><div id="summary">Ready</div><div class="legend"><span class="legend-added">+</span> added <span class="legend-deleted">−</span> deleted<span class="footer-hint">Hold Shift to drop from Source Control · Click a file for diff</span></div><button id="all-files" class="quiet">Files</button><button id="other" class="quiet" hidden></button></footer>
+<footer><div id="summary">Ready</div><div class="legend"><span class="legend-added">+</span> added <span class="legend-deleted">−</span> deleted<span id="staging-legend" hidden><span class="staging-swatch"></span> staged <span class="staging-swatch dark"></span> unstaged</span><span class="footer-hint">Hold Shift to drop from Source Control · Click a file for diff</span></div><button id="all-files" class="quiet">Files</button><button id="other" class="quiet" hidden></button></footer>
 <dialog id="other-dialog"><div class="dialog-head"><strong id="files-heading">Changed files</strong><button id="close-dialog" class="quiet" aria-label="Close">×</button></div><p class="muted" id="files-description">Open any file, including files too small to show on the canvas.</p><input id="file-filter" type="search" placeholder="Filter by path…" aria-label="Filter files by path"><div id="other-files"></div></dialog>
 <div id="tooltip" role="tooltip" hidden></div>
+<div id="file-context" role="menu" aria-label="File staging" hidden></div>
 `;
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 interface ViewState { mode?: AreaMode; expanded?: string[]; focus?: string; repository?: string; initialized?: boolean }
@@ -46,6 +47,7 @@ let busy = false;
 let dragged = 0;
 let renderFrame = 0;
 let listedFiles: Comparison['files'] = [];
+let contextTrigger: HTMLElement | undefined;
 const number = (value: number) => value.toLocaleString();
 function persist() { vscode.setState({ mode, expanded: [...expanded], focus, repository: comparison?.repository, initialized }); }
 function applySettings(value: Settings) {
@@ -53,9 +55,60 @@ function applySettings(value: Settings) {
   if (!modeChosen) { mode = settings.mode; }
   document.documentElement.style.setProperty('--added', value.addedColor);
   document.documentElement.style.setProperty('--deleted', value.deletedColor);
+  const darken = (color: string) => `#${color.slice(1).match(/../g)!.map(channel => Math.round(parseInt(channel, 16) * .55).toString(16).padStart(2, '0')).join('')}`;
+  document.documentElement.style.setProperty('--unstaged-added', darken(value.addedColor));
+  document.documentElement.style.setProperty('--unstaged-deleted', darken(value.deletedColor));
   el<HTMLSelectElement>('mode').value = mode;
 }
 function hideTooltip() { el('tooltip').hidden = true; }
+function stagingLabel(file: DiffFile): string {
+  return file.staging === 'partial' ? 'Partially staged' : file.staging === 'staged' ? 'Staged' : 'Unstaged';
+}
+function hideContextMenu(restoreFocus = false) {
+  el('file-context').hidden = true;
+  if (restoreFocus && contextTrigger?.isConnected) { contextTrigger.focus(); }
+  contextTrigger = undefined;
+}
+function showContextMenu(event: MouseEvent, file: DiffFile, trigger: HTMLElement) {
+  const current = comparison;
+  if (busy || !current || current.kind === 'commits') { return; }
+  const actions: ('stage' | 'unstage')[] = [];
+  if ((current.kind === 'unstaged' || current.kind === 'uncommitted') && file.staging !== 'staged') { actions.push('stage'); }
+  if ((current.kind === 'staged' || current.kind === 'uncommitted') && file.staging !== 'unstaged') { actions.push('unstage'); }
+  if (!actions.length) { return; }
+  event.preventDefault(); event.stopPropagation(); hideTooltip();
+  contextTrigger = trigger;
+  const menu = el('file-context'); menu.replaceChildren();
+  // Keep the menu inside a modal dialog so its controls remain interactive.
+  (trigger.closest('dialog') ?? app).append(menu);
+  for (const action of actions) {
+    const button = document.createElement('button'); button.setAttribute('role', 'menuitem');
+    button.textContent = action === 'stage' ? 'Stage Changes' : 'Unstage Changes';
+    button.addEventListener('click', () => {
+      hideContextMenu(true);
+      send({ type: action, path: file.path, repository: current.repository, kind: current.kind });
+    });
+    menu.append(button);
+  }
+  menu.hidden = false;
+  const bounds = trigger.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(event.clientX || bounds.left, innerWidth - menu.offsetWidth - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(event.clientY || bounds.bottom, innerHeight - menu.offsetHeight - 4))}px`;
+  menu.querySelector('button')!.focus();
+}
+document.addEventListener('pointerdown', event => { if (!el('file-context').contains(event.target as Node)) { hideContextMenu(); } });
+document.addEventListener('keydown', event => {
+  const menu = el('file-context');
+  if (menu.hidden) { return; }
+  if (event.key === 'Escape' || event.key === 'Tab') {
+    hideContextMenu(true);
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); }
+  } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault();
+    const items = [...menu.querySelectorAll('button')], index = items.indexOf(document.activeElement as HTMLButtonElement);
+    items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]!.focus();
+  }
+}, true);
 function updateSteps() {
   for (const side of ['base', 'target'] as const) {
     for (const direction of ['older', 'newer']) {
@@ -70,7 +123,7 @@ function tooltip(event: MouseEvent, node: TreeNode) {
   const counts = document.createElement('div'); counts.textContent = `+${number(node.added)} added   −${number(node.deleted)} deleted`;
   const detail = document.createElement('div'); detail.className = 'muted';
   detail.textContent = node.file
-    ? `${node.file.status} · ${node.file.binary ? 'Binary file' : `${number(weight(node, mode))} lines of area`} · Click to open diff${node.file.path !== node.file.oldPath ? ` · From ${node.file.oldPath}` : ''}`
+    ? `${node.file.status}${comparison?.kind !== 'commits' ? ` · ${stagingLabel(node.file)} · Right-click for staging actions` : ''} · ${node.file.binary ? 'Binary file' : `${number(weight(node, mode))} lines of area`} · Click to open diff${node.file.path !== node.file.oldPath ? ` · From ${node.file.oldPath}` : ''}`
     : `${number(node.count)} files · Click to ${expanded.has(node.path) ? 'collapse' : 'expand'}`;
   tip.append(title, counts, detail); tip.hidden = false;
   tip.style.left = `${Math.max(8, Math.min(event.clientX + 14, innerWidth - tip.offsetWidth - 8))}px`;
@@ -93,14 +146,18 @@ function activate(node: TreeNode) {
   if (node.file) { send({ type: 'openDiff', path: node.path }); }
   else { if (expanded.has(node.path)) { expanded.delete(node.path); } else { expanded.add(node.path); } persist(); render(); }
 }
-function paint(node: TreeNode, button: HTMLElement) {
+function paint(node: Pick<TreeNode, 'added' | 'deleted' | 'unstagedCount'>, button: HTMLElement) {
+  const dark = comparison?.kind === 'uncommitted' && node.unstagedCount > 0;
+  const added = dark ? 'var(--unstaged-added)' : 'var(--added)';
+  const deleted = dark ? 'var(--unstaged-deleted)' : 'var(--deleted)';
   if (mode === 'net') {
-    button.style.background = node.added > node.deleted ? 'var(--added)' : node.added < node.deleted ? 'var(--deleted)' : 'var(--vscode-badge-background, #666666)';
+    const neutral = dark ? 'color-mix(in srgb, var(--vscode-badge-background, #666666) 55%, black)' : 'var(--vscode-badge-background, #666666)';
+    button.style.background = node.added > node.deleted ? added : node.added < node.deleted ? deleted : neutral;
     return;
   }
   const all = node.added + node.deleted;
   const percent = mode === 'added' ? 100 : mode === 'deleted' ? 0 : all ? node.added / all * 100 : 0;
-  button.style.background = `linear-gradient(to bottom, var(--added) 0%, var(--added) ${percent}%, var(--deleted) ${percent}%, var(--deleted) 100%)`;
+  button.style.background = `linear-gradient(to bottom, ${added} 0%, ${added} ${percent}%, ${deleted} ${percent}%, ${deleted} 100%)`;
 }
 function draw(parent: HTMLElement, node: TreeNode, width: number, height: number) {
   const fragment = document.createDocumentFragment();
@@ -117,6 +174,10 @@ function draw(parent: HTMLElement, node: TreeNode, width: number, height: number
     control.className = 'tile-control';
     control.setAttribute('aria-label', `${tile.node.path}, ${tile.node.added} added, ${tile.node.deleted} deleted. ${folder ? 'Toggle folder' : 'Open diff'}`);
     if (folder) { control.setAttribute('aria-expanded', String(isExpanded)); }
+    if (tile.node.file && comparison?.kind !== 'commits') {
+      control.setAttribute('aria-label', `${control.getAttribute('aria-label')}. ${stagingLabel(tile.node.file)}`);
+      control.addEventListener('contextmenu', event => showContextMenu(event, tile.node.file!, control));
+    }
     paint(tile.node, control);
     const name = document.createElement('span'); name.className = 'tile-name';
     name.textContent = `${folder ? (isExpanded ? '▾ ' : '▸ ') : ''}${tile.node.name}`;
@@ -162,8 +223,11 @@ function renderOther(files: Comparison['files']) {
     const row = document.createElement('div'); row.className = 'file-row';
     const button = document.createElement('button'); button.className = 'other-file';
     const path = document.createElement('span'); path.textContent = file.path;
-    const counts = document.createElement('span'); counts.className = 'muted'; counts.textContent = file.binary ? 'Binary' : `+${file.added} −${file.deleted} · ${file.status}`;
-    button.append(path, counts);
+    const counts = document.createElement('span'); counts.className = 'muted'; counts.textContent = `${file.binary ? 'Binary' : `+${file.added} −${file.deleted} · ${file.status}`}${comparison?.kind !== 'commits' ? ` · ${stagingLabel(file)}` : ''}`;
+    const swatch = document.createElement('span'); swatch.className = 'file-swatch'; swatch.setAttribute('aria-hidden', 'true');
+    paint({ ...file, unstagedCount: Number(file.staging === 'unstaged' || file.staging === 'partial') }, swatch);
+    button.append(swatch, path, counts);
+    button.addEventListener('contextmenu', event => showContextMenu(event, file, button));
     button.addEventListener('click', () => { el<HTMLDialogElement>('other-dialog').close(); send({ type: 'openDiff', path: file.path }); });
     row.append(button);
     const parent = file.path.split('/').slice(0, -1).join('/');
@@ -177,7 +241,8 @@ function renderOther(files: Comparison['files']) {
   }
 }
 function render() {
-  hideTooltip();
+  hideTooltip(); hideContextMenu();
+  el('staging-legend').hidden = comparison?.kind !== 'uncommitted';
   const node = findDirectory(focus);
   renderBreadcrumbs();
   const tiles = el('tiles'); tiles.replaceChildren();
@@ -233,6 +298,7 @@ el('expand').addEventListener('click', () => {
   persist(); render();
 });
 function showFiles(onlyWithoutArea: boolean) {
+  hideContextMenu();
   listedFiles = (comparison?.files ?? []).filter(file => (!focus || file.path.startsWith(`${focus}/`)) && (!onlyWithoutArea || weight(file, mode) === 0));
   el('files-heading').textContent = onlyWithoutArea ? 'Files without area in this mode' : 'Changed files';
   el('files-description').textContent = onlyWithoutArea ? 'Binary files, pure renames and files with zero selected lines remain accessible here.' : 'Open any file, including files too small to show on the canvas.';
@@ -242,6 +308,7 @@ el('other').addEventListener('click', () => showFiles(true));
 el('all-files').addEventListener('click', () => showFiles(false));
 el('file-filter').addEventListener('input', () => { const query = el<HTMLInputElement>('file-filter').value.toLowerCase(); renderOther(listedFiles.filter(file => file.path.toLowerCase().includes(query))); });
 el('close-dialog').addEventListener('click', () => el<HTMLDialogElement>('other-dialog').close());
+el('other-dialog').addEventListener('close', () => hideContextMenu());
 function showError(message: string) { el('error').textContent = message; el('error').hidden = false; }
 window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
   const message = event.data;
@@ -266,7 +333,7 @@ window.addEventListener('message', (event: MessageEvent<HostMessage>) => {
     }
     case 'settings': applySettings(message.settings); render(); break;
     case 'reset': comparison = undefined; tree = buildTree([]); el('other').hidden = true; el('summary').textContent = 'Loading repository…'; updateSteps(); render(); break;
-    case 'busy': busy = message.busy; canvas.setAttribute('aria-busy', String(busy)); app.classList.toggle('busy', busy); el('refresh').classList.toggle('spinning', busy); updateSteps(); break;
+    case 'busy': busy = message.busy; if (busy) { hideContextMenu(); } canvas.setAttribute('aria-busy', String(busy)); app.classList.toggle('busy', busy); el('refresh').classList.toggle('spinning', busy); updateSteps(); break;
     case 'error': showError(message.message); break;
   }
 });

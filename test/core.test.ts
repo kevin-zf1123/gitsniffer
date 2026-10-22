@@ -176,6 +176,7 @@ test('working comparisons separate staged, unstaged, uncommitted and retain capt
     const repo = new GitRepository(root);
     const staged = await repo.working('staged');
     assert.equal(staged.files.length, 1); assert.equal(staged.files[0]?.added, 1); assert.equal(staged.files[0]?.deleted, 1);
+    assert.equal(staged.files[0]?.staging, 'staged');
     assert.equal(Buffer.from(await repo.readObject(staged.files[0]!.newOid, '100644')).toString(), 'one\nstaged\n');
     const unstaged = await repo.working('unstaged');
     assert.equal(unstaged.files.find(f => f.path === 'file.txt')?.added, 1);
@@ -183,14 +184,100 @@ test('working comparisons separate staged, unstaged, uncommitted and retain capt
     assert.equal(unstaged.files.find(f => f.path === 'removed.txt')?.deleted, 1);
     assert.equal(unstaged.files.find(f => f.path === 'untracked.txt')?.added, 2);
     assert.equal(unstaged.files.find(f => f.path === 'picture.bin')?.binary, true);
+    assert.equal(unstaged.files.find(f => f.path === 'file.txt')?.staging, 'partial');
+    assert.equal(unstaged.files.find(f => f.path === 'untracked.txt')?.staging, 'unstaged');
     assert.equal(unstaged.files.some(f => f.path === 'skip.ignored'), false);
     const uncommitted = await repo.working('uncommitted');
     assert.equal(uncommitted.files.find(f => f.path === 'file.txt')?.added, 2);
     assert.equal(uncommitted.files.find(f => f.path === 'file.txt')?.deleted, 1);
+    assert.equal(uncommitted.files.find(f => f.path === 'file.txt')?.staging, 'partial');
     await writeFile(join(root, 'file.txt'), 'edited after refresh\n');
     assert.equal(Buffer.from(uncommitted.contents.get('file.txt')!).toString(), 'one\nstaged\nworking\n');
     // Neither reading state nor computing untracked line counts stages or writes files.
     assert.equal(git('show', ':file.txt'), 'one\nstaged');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('stage and unstage update only selected literal paths and preserve working content', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'git-sniffer-staging-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  try {
+    git('init', '-b', 'main'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
+    await writeFile(join(root, 'tracked.txt'), 'original\n');
+    await writeFile(join(root, 'removed.txt'), 'remove me\n');
+    await writeFile(join(root, 'keep.txt'), 'keep\n');
+    git('add', '.'); git('commit', '-m', 'Initial');
+    const head = git('rev-parse', 'HEAD');
+    const repo = new GitRepository(root);
+    await writeFile(join(root, 'tracked.txt'), 'staged\n');
+    await writeFile(join(root, 'unrelated.txt'), 'unrelated\n');
+    await rm(join(root, 'removed.txt'));
+    for (const path of [':(glob)*', '-leading.txt', 'bracket[1].txt', 'tab\tline\n新.txt']) {
+      await writeFile(join(root, path), 'literal\n');
+      await repo.stage(path);
+      assert.deepEqual((await repo.working('staged')).files.map(file => file.path), [path]);
+      assert.equal((await repo.working('uncommitted')).files.find(file => file.path === path)?.staging, 'staged');
+      await repo.unstage(path);
+      assert.equal((await repo.working('staged')).files.length, 0);
+      assert.equal((await repo.working('unstaged')).contents.get(path)?.toString(), 'literal\n');
+    }
+    await repo.stage('tracked.txt');
+    assert.equal(git('show', ':tracked.txt'), 'staged');
+    await writeFile(join(root, 'tracked.txt'), 'staged\nworking\n');
+    assert.equal((await repo.working('uncommitted')).files.find(file => file.path === 'tracked.txt')?.staging, 'partial');
+    await writeFile(join(root, 'keep.txt'), 'keep staged\n'); git('add', 'keep.txt');
+    await repo.unstage('tracked.txt');
+    assert.equal(git('show', ':tracked.txt'), 'original');
+    assert.equal((await repo.working('unstaged')).contents.get('tracked.txt')?.toString(), 'staged\nworking\n');
+    assert.equal(git('show', ':keep.txt'), 'keep staged');
+    await repo.stage('removed.txt');
+    assert.equal((await repo.working('staged')).files.find(file => file.path === 'removed.txt')?.status, 'D');
+    await repo.unstage('removed.txt');
+    assert.equal(git('show', ':removed.txt'), 'remove me');
+    assert.equal((await repo.working('unstaged')).files.find(file => file.path === 'removed.txt')?.status, 'D');
+    await mkdir(join(root, 'folder')); await writeFile(join(root, 'folder/child.txt'), 'child\n');
+    for (const path of ['', '.', '..', '../outside', '/outside', 'folder/../tracked.txt', 'bad\0path', 'folder', 'missing.txt']) {
+      await assert.rejects(repo.stage(path)); await assert.rejects(repo.unstage(path));
+    }
+    assert.deepEqual((await repo.working('staged')).files.map(file => file.path), ['keep.txt']);
+    assert.equal(git('rev-parse', 'HEAD'), head);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('unstage restores both index paths of a rename while retaining its working destination', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'git-sniffer-unstage-rename-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  try {
+    git('init', '-b', 'main'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
+    const original = 'rename content\n'.repeat(30);
+    await writeFile(join(root, 'old.txt'), original); git('add', '.'); git('commit', '-m', 'Initial');
+    git('mv', 'old.txt', 'new.txt');
+    const repo = new GitRepository(root);
+    assert.equal((await repo.working('uncommitted')).files[0]?.staging, 'staged');
+    await writeFile(join(root, 'new.txt'), original + 'working\n');
+    assert.equal((await repo.working('uncommitted')).files[0]?.staging, 'partial');
+    await repo.unstage('new.txt');
+    assert.equal((await repo.working('staged')).files.length, 0);
+    const unstaged = await repo.working('unstaged');
+    assert.equal(unstaged.files.find(file => file.path === 'old.txt')?.status, 'D');
+    assert.equal(unstaged.contents.get('new.txt')?.toString(), original + 'working\n');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('stage and unstage work before the first commit even after further working edits', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'git-sniffer-stage-unborn-'));
+  try {
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root });
+    const repo = new GitRepository(root);
+    await writeFile(join(root, 'first.txt'), 'first\n');
+    await repo.stage('first.txt');
+    assert.equal((await repo.working('uncommitted')).files[0]?.staging, 'staged');
+    await writeFile(join(root, 'first.txt'), 'first\nsecond\n');
+    await repo.unstage('first.txt');
+    assert.equal((await repo.working('staged')).files.length, 0);
+    const working = await repo.working('uncommitted');
+    assert.equal(working.files[0]?.staging, 'unstaged');
+    assert.equal(working.contents.get('first.txt')?.toString(), 'first\nsecond\n');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

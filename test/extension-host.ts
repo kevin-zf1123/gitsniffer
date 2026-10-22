@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { strict as assert } from 'node:assert';
 import { chromium, type Frame } from 'playwright';
 import { execFileSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 export async function run() {
   const root = process.env.SNIFFER_FIXTURE!;
@@ -123,6 +125,46 @@ export async function run() {
     await frame.waitForFunction(base => (document.getElementById('kind') as HTMLSelectElement).value === 'commits' && document.querySelector('#base .revision-hash')?.textContent === base, process.env.SNIFFER_BASE!.slice(0, 8));
     await vscode.workspace.getConfiguration('gitSniffer').update('areaMode', 'net', vscode.ConfigurationTarget.Global);
     await frame.waitForFunction(() => (document.getElementById('mode') as HTMLSelectElement).value === 'net');
-    console.log('Extension host passed: native Graph commit menus and drag payload; picker filters and revision navigation; native commit/index/working diffs; configured net area mode. Physical drag gesture needs manual validation.');
+    // Operate actual webview menus and inspect the real index after every action.
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+    const working = await readFile(join(root, 'src/extension.ts'), 'utf8');
+    const head = git('rev-parse', 'HEAD');
+    const chooseKind = async (kind: string) => {
+      await frame!.locator('#kind').selectOption(kind);
+      await frame!.waitForFunction(kind => document.querySelector('#base .revision-name')?.textContent === (kind === 'unstaged' ? 'Index (staged)' : 'HEAD') &&
+        document.querySelector('#target .revision-name')?.textContent === (kind === 'staged' ? 'Index (staged)' : 'Working tree') && document.getElementById('canvas')?.getAttribute('aria-busy') === 'false', kind);
+    };
+    const extensionTile = frame.locator('.tile[data-path="src/extension.ts"] > .tile-control');
+    await chooseKind('uncommitted');
+    await extensionTile.click({ button: 'right' });
+    assert.equal(await frame.getByRole('menuitem').count(), 2);
+    await frame.getByRole('menuitem', { name: 'Stage Changes', exact: true }).click();
+    await frame.waitForFunction(() => document.querySelector('.tile[data-path="src/extension.ts"] > .tile-control')?.getAttribute('aria-label')?.endsWith('. Staged') && document.getElementById('canvas')?.getAttribute('aria-busy') === 'false');
+    assert.equal(git('show', ':src/extension.ts'), working);
+    await extensionTile.click({ button: 'right' });
+    assert.equal(await frame.getByRole('menuitem').count(), 1);
+    await frame.getByRole('menuitem', { name: 'Unstage Changes', exact: true }).click();
+    await frame.waitForFunction(() => document.querySelector('.tile[data-path="src/extension.ts"] > .tile-control')?.getAttribute('aria-label')?.endsWith('. Unstaged') && document.getElementById('canvas')?.getAttribute('aria-busy') === 'false');
+    assert.equal(git('show', ':src/extension.ts'), git('show', 'HEAD:src/extension.ts'));
+    assert.equal(await readFile(join(root, 'src/extension.ts'), 'utf8'), working);
+    await chooseKind('unstaged');
+    await extensionTile.click({ button: 'right' });
+    await frame.getByRole('menuitem', { name: 'Stage Changes', exact: true }).click();
+    await extensionTile.waitFor({ state: 'hidden' });
+    assert.equal(git('show', ':src/extension.ts'), working);
+    await chooseKind('staged');
+    await extensionTile.click({ button: 'right' });
+    await frame.getByRole('menuitem', { name: 'Unstage Changes', exact: true }).click();
+    await extensionTile.waitFor({ state: 'hidden' });
+    assert.equal(git('show', ':src/extension.ts'), git('show', 'HEAD:src/extension.ts'));
+    await chooseKind('unstaged');
+    await frame.locator('#all-files').click();
+    await frame.locator('.other-file').filter({ hasText: 'new-file.txt' }).click({ button: 'right' });
+    await frame.getByRole('menuitem', { name: 'Stage Changes', exact: true }).click();
+    await frame.locator('#other-dialog').waitFor({ state: 'hidden' });
+    assert.equal(git('show', ':new-file.txt'), 'untracked edit\n');
+    assert.equal(git('rev-parse', 'HEAD'), head);
+    assert.equal(await readFile(join(root, 'src/extension.ts'), 'utf8'), working);
+    console.log('Extension host passed: real stage/unstage menus in Unstaged, Staged and Uncommitted, partial staging and file-list staging preserve working bytes and HEAD; native graph menus, drag payload, revision navigation and diffs. Physical drag gesture needs manual validation.');
   } finally { await browser.close(); }
 }

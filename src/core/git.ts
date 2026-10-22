@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, readlink, mkdtemp, writeFile, symlink, rm } from 'node:fs/promises';
 import { resolve, relative, isAbsolute, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { ComparisonKind, DiffFile, RefChoice, Revision } from './types';
+import type { ComparisonKind, DiffFile, RefChoice, Revision, StagingState } from './types';
 const execute = promisify(execFile);
 export const isOid = (value: string): boolean => /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value);
 
@@ -60,6 +60,27 @@ export interface WorkingComparison {
 }
 const diffFlags = ['--no-ext-diff', '--no-textconv', '--no-color', '--find-renames', '--ignore-submodules=none', '--diff-algorithm=myers'];
 
+function stagingStates(output: string): Map<string, StagingState> {
+  const states = new Map<string, StagingState>();
+  const tokens = output.split('\0');
+  const add = (path: string, staged: boolean, unstaged: boolean) => {
+    const previous = states.get(path);
+    staged ||= previous === 'staged' || previous === 'partial';
+    unstaged ||= previous === 'unstaged' || previous === 'partial';
+    states.set(path, staged && unstaged ? 'partial' : staged ? 'staged' : 'unstaged');
+  };
+  for (let i = 0; i < tokens.length && tokens[i]; i++) {
+    const record = tokens[i]!, x = record[0]!, y = record[1]!;
+    add(record.slice(3), x !== ' ' && x !== '?', y !== ' ');
+    // Porcelain -z emits the destination first, followed by the original path.
+    if (/[RC]/.test(x + y)) {
+      const oldPath = tokens[++i]!;
+      if (x === 'R' || y === 'R') { add(oldPath, x === 'R', y === 'R'); }
+    }
+  }
+  return states;
+}
+
 export class GitRepository {
   constructor(readonly root: string, readonly executable = 'git') {}
 
@@ -113,6 +134,35 @@ export class GitRepository {
     return parseDiff((await this.run(['diff', ...diffFlags, '--raw', '--numstat', '--no-abbrev', '-z', base.oid, target.oid, '--'])).toString('utf8'));
   }
 
+  /** Stage only the selected file, treating Git pathspec metacharacters literally. */
+  async stage(filePath: string): Promise<void> {
+    this.validateFilePath(filePath);
+    const file = (await this.working('unstaged')).files.find(file => file.path === filePath);
+    if (!file) { throw new Error('That file has no unstaged changes. Refresh the comparison.'); }
+    const paths = file.status.startsWith('R') ? [file.oldPath, file.path] : [file.path];
+    await this.run(['--literal-pathspecs', 'add', '--all', '--', ...paths]);
+  }
+
+  /** Restore the selected index entry (both ends of a rename), keeping working bytes. */
+  async unstage(filePath: string): Promise<void> {
+    this.validateFilePath(filePath);
+    const staged = await this.working('staged');
+    const file = staged.files.find(file => file.path === filePath || (file.status.startsWith('R') && file.oldPath === filePath));
+    if (!file) { throw new Error('That file has no staged changes. Refresh the comparison.'); }
+    const paths = file.status.startsWith('R') ? [file.oldPath, file.path] : [file.path];
+    if (staged.base.empty) {
+      await this.run(['--literal-pathspecs', 'rm', '--cached', '--force', '--', ...paths]);
+    } else {
+      await this.run(['--literal-pathspecs', 'reset', '--quiet', staged.base.oid, '--', ...paths]);
+    }
+  }
+
+  private validateFilePath(filePath: string): void {
+    if (!filePath || filePath.includes('\0') || isAbsolute(filePath) || filePath.split('/').some(part => !part || part === '.' || part === '..')) {
+      throw new Error('Choose a file inside the repository.');
+    }
+  }
+
   /** Capture working bytes, then verify they stayed stable across Git's line count. */
   async working(kind: Exclude<ComparisonKind, 'commits'>): Promise<WorkingComparison> {
     if ((await this.run(['ls-files', '--unmerged', '-z'])).length) { throw new Error('Resolve merge conflicts before comparing working changes. Commit comparisons are still available.'); }
@@ -123,10 +173,12 @@ export class GitRepository {
     const args = ['diff', ...diffFlags, '--raw', '--numstat', '--no-abbrev', '-z',
       ...(kind === 'staged' ? ['--cached', head.oid] : kind === 'uncommitted' ? [head.oid] : []), '--'];
     if (kind === 'staged') {
-      return { base, target, files: parseDiff((await this.run(args)).toString('utf8')), contents: new Map() };
+      return { base, target, files: parseDiff((await this.run(args)).toString('utf8')).map(file => ({ ...file, staging: 'staged' })), contents: new Map() };
     }
     const untracked = () => this.run(['ls-files', '--others', '--exclude-standard', '-z']);
+    const status = () => this.run(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=none']);
     for (let attempt = 0; attempt < 2; attempt++) {
+      const initialStatus = await status();
       const first = await this.run(args);
       const others = await untracked();
       let files = parseDiff(first.toString('utf8'));
@@ -196,11 +248,14 @@ export class GitRepository {
         }
       }));
       const final = await this.run(args);
-      if (!first.equals(final) || !others.equals(await untracked())) { changed = true; }
+      if (!first.equals(final) || !others.equals(await untracked()) || !initialStatus.equals(await status())) { changed = true; }
       for (const [filePath, signature] of signatures) {
         try { if ((await stat(filePath)).signature !== signature) { changed = true; } } catch { changed = true; }
       }
-      if (!changed) { return { base, target, files, contents }; }
+      if (!changed) {
+        const states = stagingStates(initialStatus.toString('utf8'));
+        return { base, target, files: files.map(file => ({ ...file, staging: states.get(file.path) ?? 'unstaged' })), contents };
+      }
     }
     throw new Error('Files or the index changed during refresh. Refresh again after the current edit or Git operation finishes.');
   }

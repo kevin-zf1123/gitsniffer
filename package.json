@@ -2,7 +2,7 @@
   "name": "git-sniffer",
   "displayName": "Git Sniffer",
   "description": "Explore Git diffs as a SpaceSniffer-style treemap. Drop branches or commits to compare snapshots.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "gitsniffer",
   "private": true,
   "engines": {

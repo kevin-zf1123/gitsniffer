@@ -7,6 +7,7 @@ export interface TreeNode {
   /** Sum of absolute file deltas; opposing files retain their individual areas. */
   netArea: number;
   count: number;
+  unstagedCount: number;
   children: TreeNode[];
   file?: DiffFile;
 }
@@ -16,7 +17,7 @@ export const weight = (node: Pick<TreeNode, 'added' | 'deleted'> & Partial<Pick<
   mode === 'added' ? node.added : mode === 'deleted' ? node.deleted : mode === 'net' ? node.netArea ?? Math.abs(node.added - node.deleted) : node.added + node.deleted;
 
 export function buildTree(files: DiffFile[]): TreeNode {
-  const make = (name: string, path: string): TreeNode => ({ name, path, added: 0, deleted: 0, netArea: 0, count: 0, children: [] });
+  const make = (name: string, path: string): TreeNode => ({ name, path, added: 0, deleted: 0, netArea: 0, count: 0, unstagedCount: 0, children: [] });
   const root = make('', '');
   const directories = new Map<string, TreeNode>([['', root]]);
   for (const file of files) {
@@ -30,9 +31,13 @@ export function buildTree(files: DiffFile[]): TreeNode {
       parent = directory;
       ancestors.push(parent);
     }
-    const leaf = { ...make(parts.at(-1)!, file.path), added: file.added, deleted: file.deleted, netArea: Math.abs(file.added - file.deleted), count: 1, file };
+    const leaf = { ...make(parts.at(-1)!, file.path), added: file.added, deleted: file.deleted, netArea: Math.abs(file.added - file.deleted), count: 1,
+      unstagedCount: Number(file.staging === 'unstaged' || file.staging === 'partial'), file };
     parent.children.push(leaf);
-    for (const ancestor of ancestors) { ancestor.added += file.added; ancestor.deleted += file.deleted; ancestor.netArea += leaf.netArea; ancestor.count++; }
+    for (const ancestor of ancestors) {
+      ancestor.added += file.added; ancestor.deleted += file.deleted; ancestor.netArea += leaf.netArea; ancestor.count++;
+      ancestor.unstagedCount += leaf.unstagedCount;
+    }
   }
   return root;
 }

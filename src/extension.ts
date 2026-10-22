@@ -168,7 +168,19 @@ class Sniffer {
         break;
       }
       case 'openDiff': if (typeof m.path === 'string') { await this.openDiff(m.path); } break;
+      case 'stage': case 'unstage': if (typeof m.path === 'string') { await this.changeStaging(m); } break;
     }
+  }
+
+  private async changeStaging(message: Extract<ClientMessage, { type: 'stage' | 'unstage' }>): Promise<void> {
+    const repo = this.repo, comparison = this.comparison;
+    const allowed = message.type === 'stage' ? ['unstaged', 'uncommitted'] : ['staged', 'uncommitted'];
+    if (!repo || !comparison || comparison.repository !== repo.root || message.repository !== repo.root ||
+        message.kind !== this.kind || comparison.kind !== this.kind || !allowed.includes(this.kind)) { return; }
+    if (!comparison.files.some(file => file.path === message.path)) { throw new Error('That file is not in the current comparison.'); }
+    this.send({ type: 'busy', busy: true });
+    try { await repo[message.type](message.path); await this.refresh(); }
+    finally { this.send({ type: 'busy', busy: false }); }
   }
 
   private async refresh(): Promise<void> {

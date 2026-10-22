@@ -96,8 +96,11 @@ window.messages=[];window.viewState=JSON.parse(sessionStorage.getItem('viewState
     assert.equal(await growTile.locator(':scope > .tile-control').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(35, 134, 54)');
     assert.equal(await shrinkTile.locator(':scope > .tile-control').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(194, 64, 64)');
     assert.equal(await page.locator('.tile[data-path="mixed"] > .tile-control').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(102, 102, 102)');
-    const areas = await Promise.all([growTile, shrinkTile].map(tile => tile.evaluate(node => { const rect = node.getBoundingClientRect(); return rect.width * rect.height; })));
-    assert.ok(Math.abs(areas[0]! - areas[1]!) < 1);
+    // Read both rectangles in one layout snapshot and allow subpixel rounding.
+    const areas = await page.evaluate(() => ['mixed/growing.ts', 'mixed/shrinking.ts'].map(path => {
+      const rect = document.querySelector(`.tile[data-path="${path}"]`)!.getBoundingClientRect(); return rect.width * rect.height;
+    }));
+    assert.ok(Math.abs(areas[0]! - areas[1]!) <= Math.max(...areas) * 0.0001, `Equal net weights have areas ${areas.join(', ')}`);
     assert.equal(await page.locator('.tile[data-path="mixed/balanced.ts"]').count(), 0);
     assert.ok((await page.locator('#summary').innerText()).endsWith('20 lines'));
     await page.locator('#other').click();
@@ -111,6 +114,48 @@ window.messages=[];window.viewState=JSON.parse(sessionStorage.getItem('viewState
     await growTile.waitFor();
     assert.equal(await page.locator('#mode').inputValue(), 'net');
     await page.locator('#mode').selectOption('total');
+    const stagingComparison: Comparison = { ...comparison, kind: 'uncommitted', repository: `${data.root}-staging`, files: [
+      { ...comparison.files[0]!, path: 'staged.ts', added: 4, deleted: 1, staging: 'staged' },
+      { ...comparison.files[0]!, path: 'unstaged.ts', added: 4, deleted: 1, staging: 'unstaged' },
+      { ...comparison.files[0]!, path: 'partial.ts', added: 4, deleted: 1, staging: 'partial' },
+      { ...comparison.files[0]!, path: 'binary.bin', added: 0, deleted: 0, binary: true, staging: 'unstaged' }
+    ] };
+    await page.evaluate(c => window.postMessage({ type: 'comparison', comparison: c, settings: { mode: 'total', addedColor: '#238636', deletedColor: '#c24040' } }, '*'), stagingComparison);
+    const stagedTile = page.locator('.tile[data-path="staged.ts"] > .tile-control');
+    const unstagedTile = page.locator('.tile[data-path="unstaged.ts"] > .tile-control');
+    const partialTile = page.locator('.tile[data-path="partial.ts"] > .tile-control');
+    await stagedTile.waitFor();
+    for (const metric of ['total', 'added', 'deleted', 'net']) {
+      await page.locator('#mode').selectOption(metric);
+      const backgrounds = await Promise.all([stagedTile, unstagedTile, partialTile].map(tile => tile.evaluate(node => { const style = getComputedStyle(node); return `${style.backgroundColor} ${style.backgroundImage}`; })));
+      assert.notEqual(backgrounds[0], backgrounds[1]);
+      assert.equal(backgrounds[1], backgrounds[2]);
+    }
+    await partialTile.hover();
+    assert.match(await page.locator('#tooltip').innerText(), /Partially staged/);
+    await partialTile.click({ button: 'right' });
+    assert.equal(await page.getByRole('menuitem').count(), 2);
+    await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
+    assert.deepEqual(await page.evaluate(() => (window as unknown as { messages: unknown[] }).messages.at(-1)), { type: 'unstage', path: 'partial.ts', repository: stagingComparison.repository, kind: 'uncommitted' });
+    await unstagedTile.click({ button: 'right' });
+    assert.equal(await page.getByRole('menuitem').count(), 1);
+    await page.getByRole('menuitem', { name: 'Stage Changes', exact: true }).click();
+    assert.deepEqual(await page.evaluate(() => (window as unknown as { messages: unknown[] }).messages.at(-1)), { type: 'stage', path: 'unstaged.ts', repository: stagingComparison.repository, kind: 'uncommitted' });
+    await stagedTile.click({ button: 'right' }); await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#file-context').isHidden(), true);
+    assert.equal(await stagedTile.evaluate(node => node === document.activeElement), true);
+    await page.locator('#other').click();
+    await page.locator('.other-file').click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Stage Changes', exact: true }).click();
+    assert.deepEqual(await page.evaluate(() => (window as unknown as { messages: unknown[] }).messages.at(-1)), { type: 'stage', path: 'binary.bin', repository: stagingComparison.repository, kind: 'uncommitted' });
+    await page.locator('#close-dialog').click();
+    for (const [kind, name, action] of [['unstaged', 'Stage Changes', 'stage'], ['staged', 'Unstage Changes', 'unstage']] as const) {
+      await page.evaluate(c => window.postMessage({ type: 'comparison', comparison: c, settings: { mode: 'total', addedColor: '#238636', deletedColor: '#c24040' } }, '*'), { ...stagingComparison, kind, files: [{ ...stagingComparison.files[0]!, staging: kind }] });
+      await stagedTile.click({ button: 'right' });
+      assert.equal(await page.getByRole('menuitem').count(), 1);
+      await page.getByRole('menuitem', { name, exact: true }).click();
+      assert.deepEqual(await page.evaluate(() => (window as unknown as { messages: unknown[] }).messages.at(-1)), { type: action, path: 'staged.ts', repository: stagingComparison.repository, kind });
+    }
     await page.evaluate(c => window.postMessage({ type: 'comparison', comparison: c, settings: { mode: 'total', addedColor: '#238636', deletedColor: '#c24040' } }, '*'), comparison);
     await page.locator('#breadcrumbs .crumb').first().click();
     await page.locator('#one-level').click();
@@ -125,7 +170,7 @@ window.messages=[];window.viewState=JSON.parse(sessionStorage.getItem('viewState
     await page.evaluate(() => { document.body.className = 'vscode-dark'; for (const name of ['--vscode-editor-background', '--vscode-sideBar-background', '--vscode-foreground', '--vscode-descriptionForeground', '--vscode-panel-border', '--vscode-dropdown-background', '--vscode-dropdown-foreground']) { document.documentElement.style.removeProperty(name); } });
     if (process.env.GIT_SNIFFER_SCREENSHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.GIT_SNIFFER_SCREENSHOT }); }
     assert.deepEqual(errors, []);
-    console.log('UI passed: four area modes, signed net colors, additive folder net area, zero-net file diff, configured and restored net mode, real Git data, expansion, ratios, drops, working presets, escaping, themes and viewport.');
+    console.log('UI passed: stage/unstage context menus in working views and file dialog, partial staging, keyboard actions, dark unstaged colors in four area modes, net area, persistence, real Git data, expansion, drops, escaping, themes and viewport.');
   } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); await data.cleanup(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

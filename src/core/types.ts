@@ -2,6 +2,7 @@ export type AreaMode = 'total' | 'added' | 'deleted' | 'net';
 export type Side = 'base' | 'target';
 export type ComparisonKind = 'commits' | 'staged' | 'unstaged' | 'uncommitted';
 export interface Revision { oid: string; label: string; empty?: boolean }
+export type StagingState = 'staged' | 'unstaged' | 'partial';
 export interface DiffFile {
   path: string;
   oldPath: string;
@@ -13,6 +14,7 @@ export interface DiffFile {
   newOid: string;
   oldMode: string;
   newMode: string;
+  staging?: StagingState;
 }
 export type RefKind = 'tag' | 'branch' | 'commit';
 export type RefFilter = 'all' | RefKind;
@@ -37,4 +39,5 @@ export type ClientMessage =
   | { type: 'step'; side: Side; direction: 'older' | 'newer' }
   | { type: 'kind'; kind: ComparisonKind }
   | { type: 'drop'; side?: Side; value: string }
-  | { type: 'openDiff'; path: string };
+  | { type: 'openDiff'; path: string }
+  | { type: 'stage' | 'unstage'; path: string; repository: string; kind: ComparisonKind };

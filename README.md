@@ -15,7 +15,7 @@ npm ci
 npm run check
 npm run compile
 npm run package
-code --install-extension git-sniffer-0.1.4.vsix
+code --install-extension git-sniffer-0.1.5.vsix
 ```
 
 For development, open this directory in VS Code and press F5 using **Run Git Sniffer**. The development host can open any Git workspace.
@@ -35,7 +35,7 @@ Commit mode initially compares HEAD's first parent with HEAD. For a root commit 
 
 The **‹ / ›** buttons next to each endpoint move only that endpoint by one commit. **‹** follows its first parent; **›** follows a direct child reachable from repository refs or the selected revisions. If several children exist, a picker asks which one to follow. Navigation preserves the selected tip so a commit entered by hash can be revisited after moving to its parent. A root or tip displays a message without changing the comparison. These buttons are disabled for working comparisons, the empty tree and while loading.
 
-Branch and tag selections resolve to fixed commits. Refresh keeps those commits fixed; pick the branch again to follow its new tip. Refresh rereads the index and working files for working comparisons. Ignored untracked files are excluded. The extension reads repository state without staging, checking out or committing.
+Branch and tag selections resolve to fixed commits. Refresh keeps those commits fixed; pick the branch again to follow its new tip. Refresh rereads the index and working files for working comparisons. Ignored untracked files are excluded. Comparing and opening diffs read repository state; explicit staging actions update the index.
 
 Working file content is captured for each refresh. File changes during capture cause a retry, then a visible error if state stays unstable. A file opened afterward shows the captured content. Staged and committed content comes from immutable Git objects.
 
@@ -44,6 +44,10 @@ Working file content is captured for each refresh. File changes during capture c
 The initial view expands root-level folders by one level. Click a folder to toggle its children; the arrow in its corner focuses that folder. A folder too small to expand in place focuses when clicked. Breadcrumbs return to its ancestors. **Collapse**, **One level** and **Expand all** control the current view.
 
 Click a file to open its two snapshots in VS Code's native diff editor beside the canvas. Added and deleted files have an empty side; renamed files use their respective old and new paths. **Files** opens a searchable list of every changed file in the current folder, including files too small to draw; its folder arrows focus their parent directories.
+
+Right-click a file on the canvas or in **Files** / **without area** to manage its staging state. **Stage Changes** is available in Unstaged and Uncommitted; **Unstage Changes** is available in Staged and Uncommitted. A partially staged file in Uncommitted offers both actions. Staging adds the file's current working changes, including additions and deletions. Unstaging restores its index entry to HEAD while retaining working content; a staged rename restores both index paths. Both actions also work before the first commit and refresh the comparison automatically.
+
+In Uncommitted, fully staged files use the configured green and red; files with unstaged changes use darker shades of the same colors. Partially staged files remain dark and are labeled **Partially staged** in the tooltip and file list. A folder uses dark shades whenever any descendant has unstaged changes. File-list swatches use the same colors, and the footer shows the staging legend. Areas and line counts continue to represent the net HEAD-to-working-tree diff.
 
 Area is measured in changed lines, as reported by Git:
 

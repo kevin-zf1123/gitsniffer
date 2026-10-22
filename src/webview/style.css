@@ -73,6 +73,9 @@ footer { display: flex; gap: 20px; padding: 12px 18px; align-items: center; font
 .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); flex: 1; }
 .legend-added, .legend-deleted { display: inline-block; border-radius: 2px; width: 13px; height: 13px; line-height: 12px; text-align: center; color: white; font-weight: 600; }
 .legend-added { background: var(--added); }.legend-deleted { background: var(--deleted); margin-left: 8px; }
+#staging-legend { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; }
+.staging-swatch { width: 13px; height: 13px; border-radius: 2px; background: linear-gradient(to bottom, var(--added) 50%, var(--deleted) 50%); }
+.staging-swatch.dark { background: linear-gradient(to bottom, var(--unstaged-added) 50%, var(--unstaged-deleted) 50%); }
 .footer-hint { margin-left: auto; }
 #tooltip { position: fixed; z-index: 100; background: var(--vscode-editorHoverWidget-background, #252526); color: var(--vscode-editorHoverWidget-foreground, var(--fg)); border: 1px solid var(--vscode-editorHoverWidget-border, var(--border)); border-radius: 4px; box-shadow: 0 4px 14px #0004; padding: 10px 12px; max-width: min(500px, 90vw); pointer-events: none; line-height: 1.8; overflow-wrap: anywhere; }
 #tooltip strong { display: block; font-weight: 600; }
@@ -93,8 +96,12 @@ dialog::backdrop { background: #0005; }
 .file-focus { flex: 0 0 30px; }
 #file-filter { width: 100%; padding: 7px; margin: 4px 0 10px; font: inherit; color: var(--vscode-input-foreground, var(--fg)); background: var(--vscode-input-background, var(--raised)); border: 1px solid var(--vscode-input-border, var(--border)); }
 .other-file:hover { background: var(--hover); }
-.other-file > span:first-child { overflow-wrap: anywhere; min-width: 0; }
+.file-swatch { flex: 0 0 12px; height: 16px; border-radius: 2px; align-self: center; }
+.other-file > span:nth-child(2) { overflow-wrap: anywhere; min-width: 0; flex: 1; }
 .other-file > span:last-child { white-space: nowrap; }
+#file-context { position: fixed; z-index: 200; min-width: 175px; padding: 4px; color: var(--vscode-menu-foreground, var(--fg)); background: var(--vscode-menu-background, var(--raised)); border: 1px solid var(--vscode-menu-border, var(--border)); border-radius: 5px; box-shadow: 0 4px 16px #0006; }
+#file-context button { display: block; width: 100%; border-radius: 3px; text-align: left; background: transparent; color: inherit; }
+#file-context button:hover, #file-context button:focus { background: var(--vscode-menu-selectionBackground, #094771); color: var(--vscode-menu-selectionForeground, #fff); outline: none; filter: none; }
 .vscode-high-contrast .tile-control, .vscode-high-contrast-light .tile-control { border: 1px solid var(--vscode-contrastBorder); }
 @media (max-width: 820px) { .footer-hint { display: none; } .toolbar { padding: 10px; gap: 6px; } .comparison-bar { padding: 10px; gap: 5px; } .revision { gap: 6px; padding: 9px; } .revision-hash { display: none; } #canvas { margin: 0 10px; } .navigation-bar, footer { padding-left: 10px; padding-right: 10px; } }
 @media (max-width: 550px) { .brand strong, .mode-label, #refresh span { display: none; } .revision-label { font-size: 9px; } .expand-controls { gap: 0; } .expand-controls button { padding: 4px; } .legend { display: none; } }
