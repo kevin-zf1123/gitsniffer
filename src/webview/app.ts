@@ -13,7 +13,7 @@ app.innerHTML = `
   <span class="toolbar-spacer"></span>
   <select id="kind" aria-label="Changes to compare"><option value="commits">Commits</option><option value="staged">Staged</option><option value="unstaged">Unstaged</option><option value="uncommitted">Uncommitted</option></select>
   <label class="mode-label" for="mode">Area</label>
-  <select id="mode" aria-label="Area metric"><option value="total">diff+ + diff−</option><option value="added">diff+ · Added</option><option value="deleted">diff− · Deleted</option></select>
+  <select id="mode" aria-label="Area metric"><option value="total">diff+ + diff−</option><option value="added">diff+ · Added</option><option value="deleted">diff− · Deleted</option><option value="net">|diff+ − diff−|</option></select>
   <button id="refresh" class="quiet" title="Refresh comparison">↻ <span>Refresh</span></button>
 </header>
 <section class="comparison-bar" aria-label="Comparison revisions">
@@ -34,7 +34,7 @@ app.innerHTML = `
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 interface ViewState { mode?: AreaMode; expanded?: string[]; focus?: string; repository?: string; initialized?: boolean }
 const previous = (vscode.getState() ?? {}) as ViewState;
-let mode: AreaMode = previous.mode === 'added' || previous.mode === 'deleted' ? previous.mode : 'total';
+let mode: AreaMode = previous.mode === 'added' || previous.mode === 'deleted' || previous.mode === 'net' ? previous.mode : 'total';
 let modeChosen = previous.mode !== undefined;
 let expanded = new Set(previous.expanded ?? []);
 let initialized = previous.initialized === true;
@@ -94,6 +94,10 @@ function activate(node: TreeNode) {
   else { if (expanded.has(node.path)) { expanded.delete(node.path); } else { expanded.add(node.path); } persist(); render(); }
 }
 function paint(node: TreeNode, button: HTMLElement) {
+  if (mode === 'net') {
+    button.style.background = node.added > node.deleted ? 'var(--added)' : node.added < node.deleted ? 'var(--deleted)' : 'var(--vscode-badge-background, #666666)';
+    return;
+  }
   const all = node.added + node.deleted;
   const percent = mode === 'added' ? 100 : mode === 'deleted' ? 0 : all ? node.added / all * 100 : 0;
   button.style.background = `linear-gradient(to bottom, var(--added) 0%, var(--added) ${percent}%, var(--deleted) ${percent}%, var(--deleted) 100%)`;

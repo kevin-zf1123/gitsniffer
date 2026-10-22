@@ -121,6 +121,8 @@ export async function run() {
     const received = await frame.evaluateHandle(text => { const data = new DataTransfer(); data.setData('text/plain', text); return data; }, payload);
     await frame.locator('#base').dispatchEvent('drop', { dataTransfer: received });
     await frame.waitForFunction(base => (document.getElementById('kind') as HTMLSelectElement).value === 'commits' && document.querySelector('#base .revision-hash')?.textContent === base, process.env.SNIFFER_BASE!.slice(0, 8));
-    console.log('Extension host passed: native Graph right-click Use as Base/Target -> exact commits without repository changes; picker filters and revision navigation; native commit/index/working diffs; Graph drag payload -> comparison. Physical drag gesture needs manual validation.');
+    await vscode.workspace.getConfiguration('gitSniffer').update('areaMode', 'net', vscode.ConfigurationTarget.Global);
+    await frame.waitForFunction(() => (document.getElementById('mode') as HTMLSelectElement).value === 'net');
+    console.log('Extension host passed: native Graph commit menus and drag payload; picker filters and revision navigation; native commit/index/working diffs; configured net area mode. Physical drag gesture needs manual validation.');
   } finally { await browser.close(); }
 }

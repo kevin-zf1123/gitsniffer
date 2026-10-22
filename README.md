@@ -15,7 +15,7 @@ npm ci
 npm run check
 npm run compile
 npm run package
-code --install-extension git-sniffer-0.1.3.vsix
+code --install-extension git-sniffer-0.1.4.vsix
 ```
 
 For development, open this directory in VS Code and press F5 using **Run Git Sniffer**. The development host can open any Git workspace.
@@ -52,8 +52,11 @@ Area is measured in changed lines, as reported by Git:
 | diff+ | Added lines | Green |
 | diff− | Deleted lines | Red |
 | diff+ + diff− | Added + deleted lines | Green above red, with heights proportional to the two counts |
+| &#124;diff+ − diff−&#124; | Absolute value of added − deleted lines per file | Green for net additions; red for net deletions |
 
-Folder counts sum their descendants. A file with zero weight in the selected mode has no rectangle. Binary files, pure renames and mode-only changes remain available through **Files** and **without area**. Binary content is passed to the native editor, which decides whether it can display it. Line totals include all changed text files, including documentation and generated files.
+In net mode (`gitSniffer.areaMode: "net"`), folder area sums the absolute net changes of individual files, so a file gaining 10 lines and another losing 10 occupy 20 lines of area together. Folder color follows its combined added − deleted count; a folder with zero combined net change uses a neutral theme color.
+
+Folder counts sum their descendants. A file with zero weight in the selected mode has no rectangle, including equal additions and deletions in net mode. These files, binary files, pure renames and mode-only changes remain available through **Files** and **without area**. Binary content is passed to the native editor, which decides whether it can display it. Line totals include all changed text files, including documentation and generated files.
 
 ## External graph integration
 

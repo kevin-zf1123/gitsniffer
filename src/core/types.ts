@@ -1,4 +1,4 @@
-export type AreaMode = 'total' | 'added' | 'deleted';
+export type AreaMode = 'total' | 'added' | 'deleted' | 'net';
 export type Side = 'base' | 'target';
 export type ComparisonKind = 'commits' | 'staged' | 'unstaged' | 'uncommitted';
 export interface Revision { oid: string; label: string; empty?: boolean }

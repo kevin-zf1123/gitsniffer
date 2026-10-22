@@ -20,7 +20,7 @@ function settings(): Settings {
     return /^#[\da-f]{6}$/i.test(value) ? value : fallback;
   };
   const mode = config.get<string>('areaMode');
-  return { mode: mode === 'added' || mode === 'deleted' ? mode : 'total',
+  return { mode: mode === 'added' || mode === 'deleted' || mode === 'net' ? mode : 'total',
     addedColor: color('addedColor', '#238636'), deletedColor: color('deletedColor', '#c24040') };
 }
 

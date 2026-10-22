@@ -15,7 +15,7 @@ async function main() {
     else {
       response.setHeader('Content-Type', 'text/html');
       response.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body class="vscode-dark"><div id="app"></div><script>
-window.messages=[];window.viewState=undefined;window.acquireVsCodeApi=()=>({postMessage:m=>window.messages.push(m),getState:()=>window.viewState,setState:s=>window.viewState=s});</script><script src="/app.js"></script></body></html>`);
+window.messages=[];window.viewState=JSON.parse(sessionStorage.getItem('viewState')||'null');window.acquireVsCodeApi=()=>({postMessage:m=>window.messages.push(m),getState:()=>window.viewState,setState:s=>{window.viewState=s;sessionStorage.setItem('viewState',JSON.stringify(s))}});</script><script src="/app.js"></script></body></html>`);
     }
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -79,6 +79,38 @@ window.messages=[];window.viewState=undefined;window.acquireVsCodeApi=()=>({post
     await page.locator('.file-focus').click();
     await page.locator('.tile[data-path="small/leaf.ts"] > .tile-control').click();
     assert.deepEqual(await page.evaluate(() => (window as unknown as { messages: unknown[] }).messages.at(-1)), { type: 'openDiff', path: 'small/leaf.ts' });
+    const netComparison = { ...comparison, repository: `${data.root}-net`, files: [
+      { ...comparison.files[0]!, path: 'mixed/growing.ts', added: 14, deleted: 4 },
+      { ...comparison.files[0]!, path: 'mixed/shrinking.ts', added: 4, deleted: 14 },
+      { ...comparison.files[0]!, path: 'mixed/balanced.ts', added: 7, deleted: 7 }
+    ] };
+    // A configured net default applies until the user chooses another metric.
+    await page.reload();
+    await page.evaluate(() => { sessionStorage.removeItem('viewState'); });
+    await page.reload();
+    await page.evaluate(c => window.postMessage({ type: 'comparison', comparison: c, settings: { mode: 'net', addedColor: '#238636', deletedColor: '#c24040' } }, '*'), netComparison);
+    await page.waitForFunction(() => (document.getElementById('mode') as HTMLSelectElement).value === 'net');
+    const growTile = page.locator('.tile[data-path="mixed/growing.ts"]');
+    const shrinkTile = page.locator('.tile[data-path="mixed/shrinking.ts"]');
+    await growTile.waitFor(); await shrinkTile.waitFor();
+    assert.equal(await growTile.locator(':scope > .tile-control').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(35, 134, 54)');
+    assert.equal(await shrinkTile.locator(':scope > .tile-control').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(194, 64, 64)');
+    assert.equal(await page.locator('.tile[data-path="mixed"] > .tile-control').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(102, 102, 102)');
+    const areas = await Promise.all([growTile, shrinkTile].map(tile => tile.evaluate(node => { const rect = node.getBoundingClientRect(); return rect.width * rect.height; })));
+    assert.ok(Math.abs(areas[0]! - areas[1]!) < 1);
+    assert.equal(await page.locator('.tile[data-path="mixed/balanced.ts"]').count(), 0);
+    assert.ok((await page.locator('#summary').innerText()).endsWith('20 lines'));
+    await page.locator('#other').click();
+    assert.equal(await page.locator('.other-file').count(), 1);
+    await page.locator('.other-file').click();
+    assert.deepEqual(await page.evaluate(() => (window as unknown as { messages: unknown[] }).messages.at(-1)), { type: 'openDiff', path: 'mixed/balanced.ts' });
+    await page.locator('#mode').selectOption('total');
+    await page.locator('#mode').selectOption('net');
+    await page.reload();
+    await page.evaluate(c => window.postMessage({ type: 'comparison', comparison: c, settings: { mode: 'total', addedColor: '#238636', deletedColor: '#c24040' } }, '*'), netComparison);
+    await growTile.waitFor();
+    assert.equal(await page.locator('#mode').inputValue(), 'net');
+    await page.locator('#mode').selectOption('total');
     await page.evaluate(c => window.postMessage({ type: 'comparison', comparison: c, settings: { mode: 'total', addedColor: '#238636', deletedColor: '#c24040' } }, '*'), comparison);
     await page.locator('#breadcrumbs .crumb').first().click();
     await page.locator('#one-level').click();
@@ -93,7 +125,7 @@ window.messages=[];window.viewState=undefined;window.acquireVsCodeApi=()=>({post
     await page.evaluate(() => { document.body.className = 'vscode-dark'; for (const name of ['--vscode-editor-background', '--vscode-sideBar-background', '--vscode-foreground', '--vscode-descriptionForeground', '--vscode-panel-border', '--vscode-dropdown-background', '--vscode-dropdown-foreground']) { document.documentElement.style.removeProperty(name); } });
     if (process.env.GIT_SNIFFER_SCREENSHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.GIT_SNIFFER_SCREENSHOT }); }
     assert.deepEqual(errors, []);
-    console.log('UI passed: real Git data, one-level expansion, file diff, three area modes, ratios, drops, working presets, omitted files, escaping, light theme, narrow viewport.');
+    console.log('UI passed: four area modes, signed net colors, additive folder net area, zero-net file diff, configured and restored net mode, real Git data, expansion, ratios, drops, working presets, escaping, themes and viewport.');
   } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); await data.cleanup(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

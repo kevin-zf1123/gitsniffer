@@ -30,7 +30,7 @@ test('tree aggregates lines and keeps file-to-directory transitions distinct', (
 
 test('treemap preserves weighted area, fits bounds, and has no overlapping rectangles in every mode', () => {
   const tree = buildTree(Array.from({ length: 140 }, (_, i) => file(`file-${i}`, i % 9 ? i * i % 131 : 0, i * 7 % 63)));
-  for (const mode of ['total', 'added', 'deleted'] as AreaMode[]) {
+  for (const mode of ['total', 'added', 'deleted', 'net'] as AreaMode[]) {
     for (const [width, height] of [[1280, 720], [200, 900], [8, 2]]) {
       const bounds = { x: 13, y: 17, width: width!, height: height! };
       const tiles = layout(tree.children, bounds, mode);
@@ -54,6 +54,24 @@ test('treemap preserves weighted area, fits bounds, and has no overlapping recta
   }
   assert.deepEqual(layout(tree.children, { x: 0, y: 0, width: 0, height: 10 }, 'total'), []);
   assert.deepEqual(layout(buildTree([file('binary', 0, 0)]).children, { x: 0, y: 0, width: 10, height: 10 }, 'total'), []);
+});
+
+test('net area sums absolute file deltas without cancelling opposing changes in folders', () => {
+  const growing = file('src/nested/growing.ts', 14, 4);
+  const shrinking = file('src/shrinking.ts', 4, 14);
+  const balanced = file('src/balanced.ts', 7, 7);
+  assert.equal(weight(growing, 'net'), 10);
+  assert.equal(weight(shrinking, 'net'), 10);
+  assert.equal(weight(balanced, 'net'), 0);
+  const tree = buildTree([growing, shrinking, balanced]);
+  const src = tree.children[0]!;
+  assert.equal(src.added - src.deleted, 0);
+  assert.equal(weight(tree, 'net'), 20);
+  assert.equal(weight(src, 'net'), 20);
+  const tiles = layout(src.children, { x: 0, y: 0, width: 100, height: 100 }, 'net');
+  assert.equal(tiles.length, 2);
+  assert.deepEqual(new Set(tiles.map(tile => tile.node.path)), new Set(['src/nested', 'src/shrinking.ts']));
+  for (const tile of tiles) { assert.equal(tile.width * tile.height, 5000); }
 });
 
 test('drop adapter accepts branches, hashes, and native Source Control history URI', () => {
